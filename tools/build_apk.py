@@ -8,7 +8,7 @@ NAMESPACE='dev.hazel.livealarm'
 APPLICATION_ID='dev.hazel.livealarm.multi'
 p=argparse.ArgumentParser()
 p.add_argument('--platform',required=True);p.add_argument('--tools',required=True);p.add_argument('--ecj')
-p.add_argument('--keystore',required=True);p.add_argument('--password-file',required=True);p.add_argument('--alias',default='hazelrelease');p.add_argument('--output',default='build/ManquAlarm-multi-1.1.0.apk')
+p.add_argument('--keystore',required=True);p.add_argument('--password-file',required=True);p.add_argument('--alias',default='hazelrelease');p.add_argument('--output',default='build/VRAlarm-1.1.0.apk')
 p.add_argument('--version-code',default='25');p.add_argument('--version-name',default='1.1.0')
 a=p.parse_args();root=pathlib.Path(__file__).resolve().parents[1];build=root/'build/manual';build.mkdir(parents=True,exist_ok=True)
 for name in ['classes','gen','dex']:

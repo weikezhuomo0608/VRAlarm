@@ -50,7 +50,7 @@ python3 tools/build_apk.py \
   --keystore /path/to/your-release.p12 \
   --password-file /path/to/your-password.txt \
   --alias your-key-alias \
-  --output build/ManquAlarm-multi-1.1.0.apk
+  --output build/VRAlarm-1.1.0.apk
 ```
 
 默认使用 `javac`；只有 JRE 时可附加 `--ecj /path/to/ecj-3.39.0.jar`。流程依次执行 AAPT2、Java 编译、D8、zipalign 和 apksigner。密钥别名必须与密钥库里实际的别名一致（用 `keytool -list -keystore <文件> -storetype PKCS12` 查看），否则签名会以 `does not contain a key` 失败。
