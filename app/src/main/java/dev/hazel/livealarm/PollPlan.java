@@ -17,10 +17,12 @@ public final class PollPlan {
 
     private PollPlan() {}
 
-    /** The wake lock has to outlive every request in the cycle, not just the first one. */
+    /** The wake lock has to outlive every request in the cycle including one transient
+     *  retry per anchor (server-side connection resets happen without any permission
+     *  problem), so the budget is two fetches per anchor plus the cycle margin. */
     public static long wakeLockMillis(int anchors) {
         int count=anchors<1?1:anchors;
-        return (long)count*FETCH_BUDGET_MS+CYCLE_MARGIN_MS;
+        return (long)count*FETCH_BUDGET_MS*2+CYCLE_MARGIN_MS;
     }
 
     /** Unchanged single-anchor formula: exponential backoff, capped at five minutes. */

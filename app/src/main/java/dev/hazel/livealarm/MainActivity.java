@@ -174,7 +174,7 @@ public class MainActivity extends Activity {
     private String versionName(){
         try{String name=getPackageManager().getPackageInfo(getPackageName(),0).versionName;if(name!=null&&!name.isEmpty())return name;}
         catch(Exception ignored){}
-        return "1.1.0";
+        return "1.1.1";
     }
     private JSONObject permissions(){
         JSONObject p=new JSONObject();NotificationManager n=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);

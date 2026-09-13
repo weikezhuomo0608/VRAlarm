@@ -251,12 +251,35 @@ public class GuardianService extends Service {
     }
     private List<Observation> fetchAll(List<Anchors.Anchor> targets){
         ArrayList<Observation> out=new ArrayList<>();
-        for(Anchors.Anchor a:targets){
-            try{out.add(new Observation(a,new BiliApi(a.uid,a.room).fetch(),null,false));}
-            catch(BiliApi.ApiException e){out.add(new Observation(a,null,e.getMessage(),e.rateLimited));}
-            catch(Exception e){out.add(new Observation(a,null,e.getMessage()==null?"暂时无法连接 B 站":e.getMessage(),false));}
+        for(int i=0;i<targets.size();i++){
+            if(i>0){try{Thread.sleep(400);}catch(InterruptedException ignored){}}
+            out.add(observe(targets.get(i)));
         }
         return out;
+    }
+    /** One anchor per call. A raw socket failure (reset/timeout) gets exactly one quick
+     *  retry: Bilibili servers drop connections for risk-control or network reasons that
+     *  a second attempt one second later usually survives. API-level errors never retry. */
+    private Observation observe(Anchors.Anchor a){
+        Exception transientFailure=null;
+        for(int attempt=0;attempt<2;attempt++){
+            if(attempt>0){try{Thread.sleep(1200);}catch(InterruptedException ignored){}}
+            try{return new Observation(a,new BiliApi(a.uid,a.room).fetch(),null,false);}
+            catch(BiliApi.ApiException e){return new Observation(a,null,e.getMessage(),e.rateLimited);}
+            catch(Exception e){transientFailure=e;}
+        }
+        return new Observation(a,null,friendlyNetError(transientFailure==null?null:transientFailure.getMessage()),false);
+    }
+    /** Raw socket text ("Socket failed: Connection reset by peer") tells the user nothing;
+     *  translate the common families once, here. */
+    private static String friendlyNetError(String raw){
+        if(raw==null||raw.isEmpty())return "暂时无法连接 B 站";
+        String low=raw.toLowerCase(Locale.ROOT);
+        if(low.contains("reset"))return "B 站服务器中断了连接（接口风控或网络抖动，不是权限问题）";
+        if(low.contains("timeout")||low.contains("timed out"))return "连接超时（网络或服务器响应慢）";
+        if(low.contains("resolve"))return "暂时无法解析服务器地址（DNS 或网络不稳）";
+        if(low.contains("unreachable")||low.contains("refused"))return "当前网络到 B 站不可达";
+        return raw;
     }
     private void check(boolean snooze){
         if(destroyed||!prefs.enabled()){if(!ringing)stopSelf();return;}

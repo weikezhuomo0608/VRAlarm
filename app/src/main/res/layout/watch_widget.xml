@@ -5,7 +5,7 @@
     android:orientation="vertical" android:background="#F0181D24"
     android:padding="12dp">
     <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textSize="14sp" android:textStyle="bold" android:textColor="#FFD9E2EA" android:text="主播闹钟"/>
+        android:textSize="14sp" android:textStyle="bold" android:textColor="#FFD9E2EA" android:text="VR闹钟"/>
     <TextView android:id="@+id/widget_live" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:textSize="13sp" android:textColor="#FFFFC9D4" android:layout_marginTop="4dp" android:text="暂未开播"/>
     <TextView android:id="@+id/widget_next" android:layout_width="match_parent" android:layout_height="wrap_content"

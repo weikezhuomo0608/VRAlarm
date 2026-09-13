@@ -8,10 +8,10 @@ public final class PollPlanTests {
 
     public static void main(String[] args){
         // The single-anchor wake lock must keep the budget the service used before multi-anchor support.
-        check(PollPlan.wakeLockMillis(1)==25000,"one anchor keeps the original 25 s wake lock");
-        check(PollPlan.wakeLockMillis(0)==25000,"an empty list still budgets one fetch");
-        check(PollPlan.wakeLockMillis(-3)==25000,"a negative count still budgets one fetch");
-        check(PollPlan.wakeLockMillis(16)==16*17000+8000,"sixteen anchors budget every fetch");
+        check(PollPlan.wakeLockMillis(1)==2*17000+8000,"one anchor budgets a retry on top of the fetch");
+        check(PollPlan.wakeLockMillis(0)==2*17000+8000,"an empty list still budgets one fetch with retry");
+        check(PollPlan.wakeLockMillis(-3)==2*17000+8000,"a negative count still budgets one fetch with retry");
+        check(PollPlan.wakeLockMillis(16)==16*2*17000+8000,"sixteen anchors budget every fetch and its retry");
         check(PollPlan.wakeLockMillis(16)>PollPlan.wakeLockMillis(4),"the budget grows with the list");
         for(int n=1;n<=16;n++)check(PollPlan.wakeLockMillis(n)>=n*PollPlan.FETCH_BUDGET_MS,"the budget covers each fetch at size "+n);
 
