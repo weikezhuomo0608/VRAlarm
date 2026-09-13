@@ -1,0 +1,53 @@
+# Build outputs and development dependencies
+.gradle/
+**/build/
+node_modules/
+local.properties
+.idea/
+*.iml
+__pycache__/
+*.py[cod]
+tests/results/
+test-results/
+playwright-report/
+
+# Local configuration and signing material
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*password*.txt
+signing.properties
+keystore.properties
+private-signing/
+secrets/
+
+# Ignore build binaries and private diagnostics by default
+*.apk
+*.aab
+*.apks
+*.idsig
+*.jar
+*.log
+*.zip
+*backup*.json
+*notification-diagnostics*.json
+*system-policy*.txt
+notification-reports/
+
+# Explicit public distribution assets, also used for GitHub Releases
+!release/v1.0.5/ManquAlarm-1.0.5.apk
+!release/v1.0.5/ManquAlarm-1.0.5.zip
+!release/v1.0.5/ManquAlarm-1.0.5-Public-Source.zip
+
+# Editor and platform files
+.DS_Store
+Thumbs.db
+*.swp
+
+# Upstream release artifacts stay out of this repository
+release/

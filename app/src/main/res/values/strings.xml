@@ -1,0 +1,1 @@
+<resources><string name="app_name">VR闹钟</string><string name="accessibility_label">VR闹钟 · 守候辅助</string><string name="accessibility_description">可选的守候辅助。仅在你已开启直播守候时，检查本应用的守候服务是否运行，并尝试恢复意外中断的服务。不读取屏幕或聊天内容，不执行点击、手势、截屏或按键操作。不会在你主动停止守候后重新启动。此辅助不能保证系统强制停止、关机或断网后的通知送达，也不能替代通知、电池及厂商自启动设置。你可随时在系统无障碍设置中关闭。</string></resources>

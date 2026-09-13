@@ -1,0 +1,11 @@
+* text=auto
+*.java text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.gradle text eol=lf
+*.xml text eol=lf
+*.png binary
+*.wav binary
