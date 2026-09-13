@@ -246,7 +246,7 @@ function paintScheduleModal(){
         const t=time(e.start)+(e.end>=0?' – '+time(e.end):'');
         return '<div class="sched-row"><div class="grow"><strong>'+t+'</strong><small class="sub">周'+dl+(e.note?' · '+esc(e.note):'')+'</small></div><button class="text-button" data-sched-del="'+esc(e.id)+'">删除 '+icon('close')+'</button></div>';
     }).join('')||'<p class="sub">还没有安排。用下面逐条添加，或粘贴周表文字识别。</p>';
-    box.innerHTML='<div class="section-label"><h2>已有安排</h2><small>'+scheduleDraft.entries.length+' / 16</small></div>'+rows+
+    box.innerHTML='<div class="section-label"><h2>已有安排</h2><span style="display:flex;gap:10px;align-items:center"><small>'+scheduleDraft.entries.length+' / 16</small>'+(scheduleDraft.entries.length?'<button class="text-button" data-action="clearScheduleDraft">清空全部</button>':'')+'</span></div>'+rows+
     '<div class="section-label"><h2>添加安排</h2></div>'+
     '<div class="form-label">重复星期</div><div class="weekday-picker">'+weekDays.map((d,i)=>'<button data-sched-weekday="'+i+'" class="'+((schedDraftDays&(1<<i))?'selected':'')+'" aria-pressed="'+!!(schedDraftDays&(1<<i))+'" aria-label="周'+d+'">'+d+'</button>').join('')+'</div>'+
     '<div class="time-inputs" style="margin-top:10px"><label><span class="form-label">开始</span><input class="input" type="time" id="sched-start" value="'+time(schedDraftStart)+'"></label><label><span class="form-label">结束（可空）</span><input class="input" type="time" id="sched-end" value="'+(schedDraftEnd>=0?time(schedDraftEnd):'')+'"></label></div>'+
@@ -300,17 +300,48 @@ async function parseScheduleIntoDraft(){
     }catch(e){if(error)error.textContent=e.message;}
 }
 function parseAiLine(line){
-    // The model was asked for `weekday|start|end|note` with weekday 0-6 (Monday first).
+    // The model answers `weekday|start|end|date|note`; the old 4-column shape still parses.
+    // A filled date column (2/15, 2026/2/15, 15号) beats the weekday column: one-off
+    // schedules land on that weekday, and the date text stays visible in the note.
     const parts=String(line).split('|').map(s=>s.trim());
     if(parts.length<3)return null;
-    const d=Number(parts[0]);
-    if(!(d>=0&&d<=6))return null;
     const minutes=s=>{s=String(s).trim();const c=s.split(':');if(c.length!==2)return -1;
         const h=Number(c[0]),mm=Number(c[1]);
         return Number.isFinite(h)&&Number.isFinite(mm)&&h<24&&mm<60&&c[0].length<=2&&c[1].length===2?h*60+mm:-1;};
     const start=minutes(parts[1]);if(start<0)return null;
     const end=parts[2]?minutes(parts[2]):-1;
-    return {days:1<<d,start,end:end>=0?end:-1,note:(parts[3]||'').slice(0,40)};
+    let datePart='',note='';
+    if(parts.length>=5){datePart=parts[3];note=parts.slice(4).join('|');}
+    else note=parts.slice(3).join('|');
+    let d=Number(parts[0]);
+    let noteText=(note||'').slice(0,40);
+    if(datePart){
+        const wd=weekdayOfDate(datePart);
+        if(wd!==null)d=wd;
+        noteText=(datePart+' '+(note||'')).trim().slice(0,40);
+    }
+    if(!(d>=0&&d<=6))return null;
+    return {days:1<<d,start,end:end>=0?end:-1,note:noteText};
+}
+function weekdayOfDate(text){
+    // Accepts M/D, YYYY/M/D, M-D, M月D日, D号; a bare M/D older than yesterday rolls to
+    // next year so December screenshots still land on a future date.
+    const t=String(text).trim();
+    let y,mo,dy;
+    let m=t.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+    if(m){y=Number(m[1]);mo=Number(m[2]);dy=Number(m[3]);}
+    else{
+        m=t.match(/^(\d{1,2})[\/\-.月](\d{1,2})日?$/);
+        if(m){const now=new Date();y=now.getFullYear();mo=Number(m[1]);dy=Number(m[2]);
+            if(new Date(y,mo-1,dy).getTime()<new Date(y,now.getMonth(),now.getDate()).getTime()-86400000)y+=1;}
+        else{
+            m=t.match(/^(\d{1,2})号$/);
+            if(!m)return null;
+            const now=new Date();y=now.getFullYear();mo=now.getMonth()+1;dy=Number(m[1]);
+        }
+    }
+    if(!(y>=2000&&y<=2100&&mo>=1&&mo<=12&&dy>=1&&dy<=31))return null;
+    return (new Date(y,mo-1,dy).getDay()+6)%7;
 }
 async function ocrScheduleIntoDraft(){
     const error=$('#sched-error');if(error)error.textContent='';
@@ -436,6 +467,7 @@ async function perform(action,anchorId=''){
     if(action==='parseScheduleText'){await parseScheduleIntoDraft();return;}
     if(action==='saveSchedule'){await saveScheduleDraft();return;}
         if(action==='ocrSchedule'){await ocrScheduleIntoDraft();return;}
+        if(action==='clearScheduleDraft'){scheduleDraft.entries=[];paintScheduleModal();return;}
     if(action==='refreshAvatars'){
         const r=await api('refreshAvatars',{},60000);
         await window.refreshNative(true);

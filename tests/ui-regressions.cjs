@@ -111,7 +111,10 @@ function installMock() {
         }
         if (action === 'pickScheduleImage') { mock.lastPickImage = patch.id; setTimeout(() => reply(id, true), 0); return; }
         if (action === 'removeScheduleImage') { mock.lastRemoveImage = patch.id; setTimeout(() => reply(id, true), 0); return; }
-        if (action === 'ocrScheduleImage') { mock.lastOcr = patch; setTimeout(() => reply(id, '4|20:00|22:30|AI游戏'+String.fromCharCode(10)+'5|21:00||AI杂谈'), 0); return; }
+        if (action === 'ocrScheduleImage') { mock.lastOcr = patch;
+            const now = new Date();
+            const md = (now.getMonth()+1)+'/'+now.getDate();
+            setTimeout(() => reply(id, '4|20:00|22:30||AI游戏'+String.fromCharCode(10)+'5|21:00|||AI杂谈'+String.fromCharCode(10)+'|19:00||'+md+'|生日会'), 0); return; }
         if (action === 'refreshAvatars') { mock.refreshedAvatars = true; setTimeout(() => reply(id, state.anchors.length), 0); return; }
         if (action === 'deleteAnchor') {
             mock.lastDeleted = patch.id;
@@ -647,7 +650,10 @@ function installMock() {
                 const ocr = await page.evaluate(() => __mock.lastOcr);
                 assert.equal(ocr.id, 'hazel');
                 const editor = await page.locator('#schedule-editor').innerText();
-                assert.match(editor, /已有安排\s*3 \/ 16/);
+                assert.match(editor, /已有安排\s*4 \/ 16/);
+                const mondayFirst = (new Date().getDay()+6)%7;
+                assert.equal(await page.evaluate(() => scheduleDraft.entries[3].days), 1 << mondayFirst, "the date-only row lands on today's weekday");
+                assert.match(await page.evaluate(() => scheduleDraft.entries[3].note), /生日会/);
                 assert.match(editor, /AI游戏/);
                 assert.match(editor, /21:00/);
                 // Nothing is saved until the user confirms.

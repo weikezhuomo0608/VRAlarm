@@ -424,7 +424,7 @@ function paintScheduleModal() {
     const t = time(e.start) + (e.end >= 0 ? " – " + time(e.end) : "");
     return '<div class="sched-row"><div class="grow"><strong>' + t + '</strong><small class="sub">周' + dl + (e.note ? " · " + esc(e.note) : "") + '</small></div><button class="text-button" data-sched-del="' + esc(e.id) + '">删除 ' + icon("close") + "</button></div>";
   }).join("") || '<p class="sub">还没有安排。用下面逐条添加，或粘贴周表文字识别。</p>';
-  box.innerHTML = '<div class="section-label"><h2>已有安排</h2><small>' + scheduleDraft.entries.length + " / 16</small></div>" + rows + '<div class="section-label"><h2>添加安排</h2></div><div class="form-label">重复星期</div><div class="weekday-picker">' + weekDays.map((d, i) => '<button data-sched-weekday="' + i + '" class="' + (schedDraftDays & 1 << i ? "selected" : "") + '" aria-pressed="' + !!(schedDraftDays & 1 << i) + '" aria-label="周' + d + '">' + d + "</button>").join("") + '</div><div class="time-inputs" style="margin-top:10px"><label><span class="form-label">开始</span><input class="input" type="time" id="sched-start" value="' + time(schedDraftStart) + '"></label><label><span class="form-label">结束（可空）</span><input class="input" type="time" id="sched-end" value="' + (schedDraftEnd >= 0 ? time(schedDraftEnd) : "") + '"></label></div><input class="input" id="sched-note" maxlength="40" placeholder="备注，例如：杂谈 / 游戏回" style="margin-top:10px"><button class="secondary" data-action="addScheduleEntry" style="margin-top:12px">' + icon("plus") + '添加这条安排</button><div class="section-label"><h2>从文字识别</h2></div><textarea class="input" id="sched-text" rows="4" placeholder="粘贴周表文字，例如：周五 20:00 游戏">' + esc((keepText !== null ? keepText : scheduleDraft.text) || "") + '</textarea><button class="secondary" data-action="parseScheduleText" style="margin-top:10px">' + icon("spark") + '识别为安排</button><p class="hint">识别结果只进上面的列表，保存前可逐条修改；也可以上传周表图片对照。</p>' + (scheduleDraft.hasImage ? '<div class="section-label"><h2>周表图片对照</h2></div><div class="sched-img"><img src="/schedule/' + esc(scheduleDraft.id) + '.img" alt="周表图片"><button class="text-button" data-action="removeScheduleImage" style="margin-top:6px">删除图片 ' + icon("close") + "</button></div>" : "") + '<button class="secondary" data-action="pickScheduleImage" style="margin-top:10px">' + icon("upload") + "上传或更换周表图片</button>" + (scheduleDraft.hasImage ? '<button class="secondary" data-action="ocrSchedule" style="margin-top:10px">' + icon("spark") + "AI 识别图片安排</button>" : "") + '<p class="hint">图片显示在列表上方，方便边看边录；只保存在本机，应用不做图片识别。</p><div class="form-error" id="sched-error"></div>';
+  box.innerHTML = '<div class="section-label"><h2>已有安排</h2><span style="display:flex;gap:10px;align-items:center"><small>' + scheduleDraft.entries.length + " / 16</small>" + (scheduleDraft.entries.length ? '<button class="text-button" data-action="clearScheduleDraft">清空全部</button>' : "") + "</span></div>" + rows + '<div class="section-label"><h2>添加安排</h2></div><div class="form-label">重复星期</div><div class="weekday-picker">' + weekDays.map((d, i) => '<button data-sched-weekday="' + i + '" class="' + (schedDraftDays & 1 << i ? "selected" : "") + '" aria-pressed="' + !!(schedDraftDays & 1 << i) + '" aria-label="周' + d + '">' + d + "</button>").join("") + '</div><div class="time-inputs" style="margin-top:10px"><label><span class="form-label">开始</span><input class="input" type="time" id="sched-start" value="' + time(schedDraftStart) + '"></label><label><span class="form-label">结束（可空）</span><input class="input" type="time" id="sched-end" value="' + (schedDraftEnd >= 0 ? time(schedDraftEnd) : "") + '"></label></div><input class="input" id="sched-note" maxlength="40" placeholder="备注，例如：杂谈 / 游戏回" style="margin-top:10px"><button class="secondary" data-action="addScheduleEntry" style="margin-top:12px">' + icon("plus") + '添加这条安排</button><div class="section-label"><h2>从文字识别</h2></div><textarea class="input" id="sched-text" rows="4" placeholder="粘贴周表文字，例如：周五 20:00 游戏">' + esc((keepText !== null ? keepText : scheduleDraft.text) || "") + '</textarea><button class="secondary" data-action="parseScheduleText" style="margin-top:10px">' + icon("spark") + '识别为安排</button><p class="hint">识别结果只进上面的列表，保存前可逐条修改；也可以上传周表图片对照。</p>' + (scheduleDraft.hasImage ? '<div class="section-label"><h2>周表图片对照</h2></div><div class="sched-img"><img src="/schedule/' + esc(scheduleDraft.id) + '.img" alt="周表图片"><button class="text-button" data-action="removeScheduleImage" style="margin-top:6px">删除图片 ' + icon("close") + "</button></div>" : "") + '<button class="secondary" data-action="pickScheduleImage" style="margin-top:10px">' + icon("upload") + "上传或更换周表图片</button>" + (scheduleDraft.hasImage ? '<button class="secondary" data-action="ocrSchedule" style="margin-top:10px">' + icon("spark") + "AI 识别图片安排</button>" : "") + '<p class="hint">图片显示在列表上方，方便边看边录；只保存在本机，应用不做图片识别。</p><div class="form-error" id="sched-error"></div>';
 }
 function addScheduleEntry() {
   const error = $("#sched-error");
@@ -505,8 +505,6 @@ async function parseScheduleIntoDraft() {
 function parseAiLine(line) {
   const parts = String(line).split("|").map((s) => s.trim());
   if (parts.length < 3) return null;
-  const d = Number(parts[0]);
-  if (!(d >= 0 && d <= 6)) return null;
   const minutes = (s) => {
     s = String(s).trim();
     const c = s.split(":");
@@ -517,7 +515,48 @@ function parseAiLine(line) {
   const start = minutes(parts[1]);
   if (start < 0) return null;
   const end = parts[2] ? minutes(parts[2]) : -1;
-  return { days: 1 << d, start, end: end >= 0 ? end : -1, note: (parts[3] || "").slice(0, 40) };
+  let datePart = "", note = "";
+  if (parts.length >= 5) {
+    datePart = parts[3];
+    note = parts.slice(4).join("|");
+  } else note = parts.slice(3).join("|");
+  let d = Number(parts[0]);
+  let noteText = (note || "").slice(0, 40);
+  if (datePart) {
+    const wd = weekdayOfDate(datePart);
+    if (wd !== null) d = wd;
+    noteText = (datePart + " " + (note || "")).trim().slice(0, 40);
+  }
+  if (!(d >= 0 && d <= 6)) return null;
+  return { days: 1 << d, start, end: end >= 0 ? end : -1, note: noteText };
+}
+function weekdayOfDate(text) {
+  const t = String(text).trim();
+  let y, mo, dy;
+  let m = t.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (m) {
+    y = Number(m[1]);
+    mo = Number(m[2]);
+    dy = Number(m[3]);
+  } else {
+    m = t.match(/^(\d{1,2})[\/\-.月](\d{1,2})日?$/);
+    if (m) {
+      const now = /* @__PURE__ */ new Date();
+      y = now.getFullYear();
+      mo = Number(m[1]);
+      dy = Number(m[2]);
+      if (new Date(y, mo - 1, dy).getTime() < new Date(y, now.getMonth(), now.getDate()).getTime() - 864e5) y += 1;
+    } else {
+      m = t.match(/^(\d{1,2})号$/);
+      if (!m) return null;
+      const now = /* @__PURE__ */ new Date();
+      y = now.getFullYear();
+      mo = now.getMonth() + 1;
+      dy = Number(m[1]);
+    }
+  }
+  if (!(y >= 2e3 && y <= 2100 && mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31)) return null;
+  return (new Date(y, mo - 1, dy).getDay() + 6) % 7;
 }
 async function ocrScheduleIntoDraft() {
   const error = $("#sched-error");
@@ -836,6 +875,11 @@ async function perform(action, anchorId = "") {
   }
   if (action === "ocrSchedule") {
     await ocrScheduleIntoDraft();
+    return;
+  }
+  if (action === "clearScheduleDraft") {
+    scheduleDraft.entries = [];
+    paintScheduleModal();
     return;
   }
   if (action === "refreshAvatars") {

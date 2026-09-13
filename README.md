@@ -11,6 +11,7 @@
 本项目基于青雾（[@Acetaffy1883Hzm](https://github.com/Acetaffy1883Hzm)）的 **[满区闹钟 ManquAlarm-](https://github.com/Acetaffy1883Hzm/ManquAlarm-)** 改造：保留其守候服务、提醒规则与可靠性设计，扩展出多主播守候、周表、AI 识别与外观自定义等能力（完整变更见 [更新说明](CHANGELOG.md)）。感谢原作者的代码与设计；上游单主播版本仍在原仓库以 1.0.x 发布。
 
 - 上游原仓库：<https://github.com/Acetaffy1883Hzm/ManquAlarm->
+- 本项目的全部代码、文档与界面迭代由 **ZCode 的免费模型 GLM-5.3-Flash**（智谱 Z.ai）完成。
 - 本仓库版本：1.1.0（多主播版首个公开版本；内部迭代 1.1.0–1.4.3 的全部能力并入此版）
 
 本应用与上游使用**不同包名**（`dev.hazel.livealarm.multi` vs `dev.hazel.livealarm`），可与上游原版并存安装，设置互不影响。

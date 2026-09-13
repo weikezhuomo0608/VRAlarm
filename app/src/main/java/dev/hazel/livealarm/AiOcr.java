@@ -13,8 +13,20 @@ import java.net.*;
 public final class AiOcr {
     private AiOcr() {}
 
-    static final String PROMPT="这是一张B站主播的直播周表图片。请提取其中所有直播安排，每行一条，严格按格式输出：星期|开始|结束|备注。"
-        +"星期用数字0到6表示周一到周日；结束时间没有就留空；没有具体时间的行不要输出；不要输出任何解释。";
+    /** Built per request so relative dates ("今天", "明天") can be resolved against today. */
+    static String prompt(){
+        java.time.LocalDate today=java.time.LocalDate.now();
+        String[] names={"星期一","星期二","星期三","星期四","星期五","星期六","星期日"};
+        String weekday=names[today.getDayOfWeek().getValue()-1];
+        return "这是一张B站主播的直播周表或开播预告图片。请提取其中每一条直播安排，每行一条，严格按以下管道分隔格式输出，不要输出任何解释或多余符号：星期|开始|结束|日期|备注。"
+            +"星期用数字0到6表示周一到周日，按图片内容判断，判断不了就留空；"
+            +"开始和结束用24小时制 HH:MM，结束时间没有就留空，「晚上8点」这类写法换算成 20:00；"
+            +"日期列只在该行写了具体日期（如 2月15日、2/15、15号）或相对日期（今天、明天、后天）时填写，统一写成 月/日（例如 2/15，跨年写成 2027/2/15），相对日期按今天是 "
+            +today.getYear()+"年"+today.getMonthValue()+"月"+today.getDayOfMonth()+"日 "+weekday+" 换算，没有日期就留空；"
+            +"备注列写直播内容、联动对象等，没有就留空；"
+            +"「休息」「停播」这类没有具体时间的行不要输出。"
+            +"示例：1|20:00|22:30|2/17|联动回。";
+    }
 
     /** image must be JPEG or PNG bytes; returns the model's plain-text schedule lines. */
     public static String readSchedule(byte[] image,String mime,String key,String model)throws IOException{
@@ -24,7 +36,7 @@ public final class AiOcr {
             JSONObject message=new JSONObject();
             Prefs.put(message,"role","user");
             JSONArray content=new JSONArray();
-            JSONObject text=new JSONObject();Prefs.put(text,"type","text");Prefs.put(text,"text",PROMPT);
+            JSONObject text=new JSONObject();Prefs.put(text,"type","text");Prefs.put(text,"text",prompt());
             content.put(text);
             JSONObject img=new JSONObject();Prefs.put(img,"type","image_url");
             JSONObject url=new JSONObject();
