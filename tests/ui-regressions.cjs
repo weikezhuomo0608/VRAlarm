@@ -636,6 +636,17 @@ function installMock() {
                 await page.locator('[data-action="removeScheduleImage"]').click(); await settle();
                 assert.equal(await page.evaluate(() => __mock.lastRemoveImage), 'hazel');
             });
+            await test('picking a schedule image repaints the editor immediately', async () => {
+                await reset('anchors');
+                await page.evaluate(async () => { __mock.state.anchors[0].scheduleImage = true; await window.refreshNative(true); });
+                await page.locator('[data-anchor-schedule="hazel"]').click();
+                await page.locator('[data-action="pickScheduleImage"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.lastPickImage), 'hazel');
+                assert.equal(await page.evaluate(() => scheduleDraft.hasImage), true);
+                const src = await page.locator('#modal .sched-img img').getAttribute('src');
+                assert.equal(src, '/schedule/hazel.img');
+                assert.match(await page.locator('#schedule-editor').innerText(), /周表图片对照/);
+            });
             await test('the bulk avatar refresh asks once and reports the count', async () => {
                 await reset('anchors');
                 await page.locator('[data-action="refreshAvatars"]').click(); await settle();

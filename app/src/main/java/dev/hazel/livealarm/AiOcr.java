@@ -28,15 +28,25 @@ public final class AiOcr {
             +"示例：1|20:00|22:30|2/17|联动回。";
     }
 
-    /** image must be JPEG or PNG bytes; returns the model's plain-text schedule lines. */
+    /** image must be JPEG or PNG bytes; returns the model's plain-text schedule lines.
+     *  Reasoning models sometimes spend every token thinking and return an empty answer;
+     *  when that happens one permissive retry (more tokens, "guess anyway" instruction)
+     *  goes out, because a rough result beats no result. */
     public static String readSchedule(byte[] image,String mime,String key,String model)throws IOException{
         if(key==null||key.trim().isEmpty())throw new IOException("请先在设置里填写 AI 接口密钥");
         if(image==null||image.length==0)throw new IOException("没有可识别的图片");
+        String answer=chat(image,mime,key,model,4000,"");
+        if(answer.isEmpty())answer=chat(image,mime,key,model,8000,
+            "注意：即使不确定，也要按上面的格式给出最佳猜测的输出行；星期无法确定就留空，但不要因此整个留空回答。");
+        if(answer.isEmpty())throw new IOException("AI 没有返回内容，请稍后再试或手动录入");
+        return answer;
+    }
+    private static String chat(byte[] image,String mime,String key,String model,int maxTokens,String extra)throws IOException{
         try{
             JSONObject message=new JSONObject();
             Prefs.put(message,"role","user");
             JSONArray content=new JSONArray();
-            JSONObject text=new JSONObject();Prefs.put(text,"type","text");Prefs.put(text,"text",prompt());
+            JSONObject text=new JSONObject();Prefs.put(text,"type","text");Prefs.put(text,"text",prompt()+extra);
             content.put(text);
             JSONObject img=new JSONObject();Prefs.put(img,"type","image_url");
             JSONObject url=new JSONObject();
@@ -47,7 +57,7 @@ public final class AiOcr {
             JSONArray messages=new JSONArray();messages.put(message);
             JSONObject body=new JSONObject();
             Prefs.put(body,"model",model==null||model.trim().isEmpty()?"deepseek-flash":model.trim());
-            Prefs.put(body,"max_tokens",4000);
+            Prefs.put(body,"max_tokens",maxTokens);
             Prefs.put(body,"messages",messages);
 
             HttpURLConnection c=(HttpURLConnection)new URL("https://api.deepseek.com/chat/completions").openConnection();
@@ -69,8 +79,7 @@ public final class AiOcr {
             JSONObject msg=choices==null||choices.length()==0?null:choices.optJSONObject(0);
             msg=msg==null?null:msg.optJSONObject("message");
             String answer=msg==null?"":msg.optString("content","");
-            if(answer.trim().isEmpty())throw new IOException("AI 没有返回内容，请稍后再试或手动录入");
-            return answer;
+            return answer.replace("```","").trim();
         }catch(org.json.JSONException e){throw new IOException("AI 响应无法解析，请稍后再试");}
     }
     private static String readAll(InputStream in)throws IOException{

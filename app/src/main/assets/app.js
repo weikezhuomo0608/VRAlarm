@@ -572,10 +572,12 @@ async function ocrScheduleIntoDraft() {
     button.textContent = "AI 识别中，约需十几秒…";
   }
   try {
-    const text = await api("ocrScheduleImage", { id: scheduleDraft.id }, 12e4);
+    const text = await api("ocrScheduleImage", { id: scheduleDraft.id }, 3e5);
     const parsed = text.split(String.fromCharCode(10)).map((s) => s.trim()).filter(Boolean).map(parseAiLine).filter(Boolean);
     if (!parsed.length) {
-      if (error) error.textContent = "AI 没有识别出安排，请手动添加";
+      const box = $("#sched-text");
+      if (box) box.value = text;
+      if (error) error.textContent = "AI 返回的内容没有解析出安排，原文已放入文本框；可修改后点「识别为安排」";
       return;
     }
     if (scheduleDraft.entries.length + parsed.length > 16) {
@@ -890,7 +892,13 @@ async function perform(action, anchorId = "") {
   }
   if (action === "pickScheduleImage") {
     if (scheduleDraft) {
-      await api("pickScheduleImage", { id: scheduleDraft.id });
+      try {
+        await api("pickScheduleImage", { id: scheduleDraft.id }, 6e4);
+        scheduleDraft.hasImage = true;
+        paintScheduleModal();
+      } catch (e) {
+        toast(e.message);
+      }
     }
     return;
   }

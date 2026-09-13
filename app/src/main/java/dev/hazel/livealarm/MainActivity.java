@@ -24,7 +24,7 @@ public class MainActivity extends Activity {
     private static final int AUDIO=50,EXPORT=51,IMPORT=52,NOTIFICATION_REPORT=53,COMPONENT_REPORT=54,SCHEDULE_IMAGE=55,PICK_BACKGROUND=56,NOTIFICATIONS=80;
     protected WebView web;protected Prefs prefs;private FrameLayout root;
     private final ExecutorService io=Executors.newSingleThreadExecutor();
-    private String pendingExport="",pendingScheduleId="";private boolean refreshing=false;private long refreshAt=0;
+    private String pendingExport="",pendingScheduleId="";private String pendingPickRequest=null;private boolean refreshing=false;private long refreshAt=0;
     private final Handler permissionHandler=new Handler(Looper.getMainLooper());
     private boolean resumed=false,notificationRequestInFlight=false;
     private final Runnable permissionRefresh=()->{if(resumed&&web!=null){GuardianService.refreshNotifications();push();}};
@@ -330,8 +330,10 @@ public class MainActivity extends Activity {
             case "saveScheduleText":{Anchors.Anchor a=anchorArg(data);prefs.saveScheduleText(a.id,data.optString("text",""));return true;}
             case "removeScheduleImage":{Anchors.Anchor a=anchorArg(data);AnchorArt.clearScheduleImage(this,a.id);return true;}
             case "pickScheduleImage":{
-                Anchors.Anchor a=anchorArg(data);pendingScheduleId=a.id;
-                startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),SCHEDULE_IMAGE);return true;
+                // The reply is deferred until onActivityResult has really stored (or
+                // rejected) the picture, so the editor can repaint the moment it lands.
+                Anchors.Anchor a=anchorArg(data);pendingScheduleId=a.id;pendingPickRequest=requestId;
+                startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),SCHEDULE_IMAGE);return DEFERRED;
             }
             case "refreshAvatars":{
                 // One lookup plus one image per anchor, sequential with a gap: B 站 rate limits.
@@ -546,7 +548,15 @@ public class MainActivity extends Activity {
         refreshPermissionsAfterReturn();
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
-        super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;
+        super.onActivityResult(request,result,data);
+        if(request==SCHEDULE_IMAGE&&(result!=RESULT_OK||data==null||data.getData()==null)){
+            // The user cancelled the picker: answer the deferred editor request instead of
+            // leaving it hanging until the bridge timeout.
+            String back=pendingPickRequest;pendingPickRequest=null;
+            if(back!=null)reply(back,false,"未选择图片");
+            return;
+        }
+        if(result!=RESULT_OK||data==null||data.getData()==null)return;
         Uri uri=data.getData();
         if(request==NOTIFICATION_REPORT||request==COMPONENT_REPORT){
             NotificationAccess.record(this,prefs,"report_export",true);
@@ -563,13 +573,14 @@ public class MainActivity extends Activity {
             }});return;
         }
         if(request==SCHEDULE_IMAGE){
+            final String back=pendingPickRequest;pendingPickRequest=null;
             io.execute(()->{
                 try{
                     byte[] bytes=readBytesBounded(uri,8*1024*1024);
                     boolean saved=AnchorArt.saveScheduleImage(this,pendingScheduleId,bytes);
-                    runOnUiThread(()->{toast(saved?"周表图片已保存":"图片保存失败，请换一张试试");push();});
+                    runOnUiThread(()->{toast(saved?"周表图片已保存":"图片保存失败，请换一张试试");if(back!=null)reply(back,saved,saved?true:"图片保存失败，请换一张试试");push();});
                 }catch(Exception e){
-                    runOnUiThread(()->toast("图片未导入："+errorText(e)));
+                    runOnUiThread(()->{toast("图片未导入："+errorText(e));if(back!=null)reply(back,false,errorText(e));});
                 }
             });return;
         }

@@ -350,9 +350,16 @@ async function ocrScheduleIntoDraft(){
     const button=$('#modal [data-action="ocrSchedule"]');
     if(button){button.disabled=true;button.textContent='AI 识别中，约需十几秒…';}
     try{
-        const text=await api('ocrScheduleImage',{id:scheduleDraft.id},120000);
+        // Two AI attempts can legitimately take a while; the Java side caps at ~270 s.
+        const text=await api('ocrScheduleImage',{id:scheduleDraft.id},300000);
         const parsed=text.split(String.fromCharCode(10)).map(s=>s.trim()).filter(Boolean).map(parseAiLine).filter(Boolean);
-        if(!parsed.length){if(error)error.textContent='AI 没有识别出安排，请手动添加';return;}
+        if(!parsed.length){
+            // Quality may be poor, but the user must not walk away empty-handed: the raw
+            // answer goes into the paste box for a manual fix and a second pass.
+            const box=$('#sched-text');if(box)box.value=text;
+            if(error)error.textContent='AI 返回的内容没有解析出安排，原文已放入文本框；可修改后点「识别为安排」';
+            return;
+        }
         if(scheduleDraft.entries.length+parsed.length>16){if(error)error.textContent='加入后超过 16 条，请先删除部分再识别';return;}
         let n=0;for(const p of parsed){p.id='w'+Date.now().toString(36)+'a'+(n++);scheduleDraft.entries.push(p);}
         paintScheduleModal();toast('AI 识别出 '+parsed.length+' 条安排，请确认后保存');
@@ -474,7 +481,14 @@ async function perform(action,anchorId=''){
         toast('已为 '+r+' 位主播刷新头像');
         return;
     }
-    if(action==='pickScheduleImage'){if(scheduleDraft){await api('pickScheduleImage',{id:scheduleDraft.id});}return;}
+    if(action==='pickScheduleImage'){
+        if(scheduleDraft){
+            try{await api('pickScheduleImage',{id:scheduleDraft.id},60000);
+                scheduleDraft.hasImage=true;paintScheduleModal();}
+            catch(e){toast(e.message);}
+        }
+        return;
+    }
     if(action==='removeScheduleImage'){if(scheduleDraft){await api('removeScheduleImage',{id:scheduleDraft.id});scheduleDraft.hasImage=false;paintScheduleModal();toast('图片已删除');}return;}
     if(action==='viewScheduleImage'){viewScheduleImage(anchorId);return;}
     if(action==='resolveAnchor'){await resolveAnchorDraft();return;}
