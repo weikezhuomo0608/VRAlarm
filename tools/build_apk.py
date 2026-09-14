@@ -8,8 +8,8 @@ NAMESPACE='dev.hazel.livealarm'
 APPLICATION_ID='dev.hazel.livealarm.multi'
 p=argparse.ArgumentParser()
 p.add_argument('--platform',required=True);p.add_argument('--tools',required=True);p.add_argument('--ecj')
-p.add_argument('--keystore',required=True);p.add_argument('--password-file',required=True);p.add_argument('--alias',default='hazelrelease');p.add_argument('--output',default='build/VRAlarm-1.1.3.apk')
-p.add_argument('--version-code',default='27');p.add_argument('--version-name',default='1.1.3')
+p.add_argument('--keystore',required=True);p.add_argument('--password-file',required=True);p.add_argument('--alias',default='hazelrelease');p.add_argument('--output',default='build/VRAlarm-1.1.4.apk')
+p.add_argument('--version-code',default='28');p.add_argument('--version-name',default='1.1.4')
 a=p.parse_args();root=pathlib.Path(__file__).resolve().parents[1];build=root/'build/manual';build.mkdir(parents=True,exist_ok=True)
 for name in ['classes','gen','dex']:
     dest=build/name
@@ -19,9 +19,17 @@ src=root/'app/src/main';sdk=pathlib.Path(a.tools).resolve();platform=str(pathlib
 if os.name!='nt':
     for binary in ['aapt2','zipalign']:(sdk/binary).chmod(0o755)
 def run(args):
+    args=[resolve_tool(x) for x in args]
     executable=pathlib.Path(str(args[0]))
     if os.name!='nt' and executable.is_absolute() and executable.is_file():executable.chmod(0o755)
     print('Running:',executable.name,flush=True);subprocess.run([str(x) for x in args],check=True,cwd=root)
+def resolve_tool(value):
+    """aapt2 and zipalign ship as .exe on Windows; CreateProcess will not guess the suffix,
+    so an extensionless path fails with WinError 2 even though the file is right there."""
+    if os.name!='nt':return value
+    p=pathlib.Path(str(value))
+    if p.is_absolute() and p.suffix=='' and p.with_suffix('.exe').is_file():return p.with_suffix('.exe')
+    return value
 run([sdk/'aapt2','compile','--dir',src/'res','-o',build/'resources.zip'])
 manifest=ET.parse(src/'AndroidManifest.xml');manifest.getroot().set('package',NAMESPACE);ET.register_namespace('android','http://schemas.android.com/apk/res/android');manifest.write(build/'AndroidManifest.xml',encoding='utf-8',xml_declaration=True)
 run([sdk/'aapt2','link','-o',build/'resources.apk','-I',platform,'--manifest',build/'AndroidManifest.xml','--java',build/'gen','--rename-manifest-package',APPLICATION_ID,'--min-sdk-version','26','--target-sdk-version','35','--version-code',a.version_code,'--version-name',a.version_name,'-0','wav','-A',src/'assets',build/'resources.zip'])

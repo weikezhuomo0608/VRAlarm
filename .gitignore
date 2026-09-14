@@ -54,3 +54,6 @@ release/
 
 # Local AI handoff notes: keep on disk, do not publish
 AI-HANDOFF.md
+
+# Local agent workspace notes: keep on disk, do not publish
+.workbuddy/

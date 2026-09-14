@@ -125,8 +125,12 @@ function installMock() {
         }
         if (action === 'resolveAnchor') {
             mock.lastResolve = patch;
+            if (mock.resolveError) { const reason = mock.resolveError; setTimeout(() => reply(id, reason, false), 0); return; }
             if (String(patch.room) === '40404') { setTimeout(() => reply(id, '没有找到这个直播间，请检查房间号', false), 0); return; }
-            setTimeout(() => reply(id, { id: patch.id || '', room: Number(patch.room), uid: 999999, name: '识别到的主播', avatar: true }), 0); return;
+            // A uid-only request has no room yet: the bridge is what maps it, so the mock
+            // answers with the room that the uid belongs to, exactly like the real one.
+            const room = Number(patch.room) || 1713546334;
+            setTimeout(() => reply(id, { id: patch.id || '', room, uid: Number(patch.uid) || 999999, name: '识别到的主播', avatar: true }), 0); return;
         }
         if (action === 'toggle') {
             state.enabled=patch.enabled;state.running=patch.enabled;
@@ -536,26 +540,31 @@ function installMock() {
                 assert.equal(saved.room, 333444);
                 assert.equal(await page.locator('[data-toggle="anchor:hazel"]').getAttribute('aria-checked'), 'true');
             });
-            await test('adding an anchor resolves the room number before saving', async () => {
+            await test('adding an anchor resolves the uid before saving', async () => {
                 await reset('anchors');
                 await page.locator('[data-action="addAnchor"]').click();
                 await page.fill('#anchor-room', '555666');
                 await page.locator('[data-action="resolveAnchor"]').click(); await settle();
-                assert.equal(await page.evaluate(() => __mock.lastResolve.room), 555666);
+                // Bare digits are a uid: that is the lookup the field now asks for.
+                assert.equal(await page.evaluate(() => __mock.lastResolve.room), 0);
+                assert.equal(await page.evaluate(() => __mock.lastResolve.uid), 555666);
                 assert.equal(await page.inputValue('#anchor-name'), '识别到的主播');
-                assert.match(await page.locator('#anchor-preview').innerText(), /UID 999999/);
+                assert.match(await page.locator('#anchor-preview').innerText(), /UID 555666/);
+                // The uid the user typed stays in the field instead of being swapped for a room id.
+                assert.equal(await page.inputValue('#anchor-room'), '555666');
                 await page.locator('[data-action="saveAnchorDraft"]').click(); await settle();
                 const saved = await page.evaluate(() => __mock.lastAnchor);
                 assert.equal(saved.name, '识别到的主播');
-                assert.equal(saved.uid, 999999);
+                assert.equal(saved.uid, 555666);
+                assert.equal(saved.room, 1713546334);
                 assert.equal(await page.locator('#modal').isVisible(), false);
             });
             await test('a changed room number cannot reuse the previously resolved identity', async () => {
                 await reset('anchors');
                 await page.locator('[data-action="addAnchor"]').click();
-                await page.fill('#anchor-room', '555666');
+                await page.fill('#anchor-room', 'https://live.bilibili.com/555666');
                 await page.locator('[data-action="resolveAnchor"]').click(); await settle();
-                await page.fill('#anchor-room', '777888');
+                await page.fill('#anchor-room', 'https://live.bilibili.com/777888');
                 await page.locator('[data-action="saveAnchorDraft"]').click(); await settle();
                 assert.match(await page.locator('#anchor-error').innerText(), /识别主播信息/);
                 assert.equal(await page.evaluate(() => __mock.lastAnchor), undefined);
@@ -564,10 +573,20 @@ function installMock() {
             await test('a failed room lookup reports the reason and keeps the dialog open', async () => {
                 await reset('anchors');
                 await page.locator('[data-action="addAnchor"]').click();
-                await page.fill('#anchor-room', '40404');
+                await page.fill('#anchor-room', 'https://live.bilibili.com/40404');
                 await page.locator('[data-action="resolveAnchor"]').click(); await settle();
                 assert.match(await page.locator('#anchor-error').innerText(), /没有找到这个直播间/);
                 assert.equal(await page.locator('#modal').isVisible(), true);
+            });
+            await test('a uid whose account has no live room is reported without blaming the input', async () => {
+                await reset('anchors');
+                await page.evaluate(() => { __mock.resolveError = '这个 UID 还没有开通直播间，请改用直播间链接'; });
+                await page.locator('[data-action="addAnchor"]').click();
+                await page.fill('#anchor-room', '555666');
+                await page.locator('[data-action="resolveAnchor"]').click(); await settle();
+                assert.match(await page.locator('#anchor-error').innerText(), /还没有开通直播间/);
+                assert.equal(await page.locator('#modal').isVisible(), true);
+                await page.evaluate(() => { __mock.resolveError = null; });
             });
             await test('the ring switch silences one anchor without touching detection', async () => {
                 await reset('anchors');
@@ -653,6 +672,34 @@ function installMock() {
                 assert.match(computed.card, /rgba\(36,44,53,0\.8\)/);
                 await page.selectOption('[data-setting="theme"]', 'light'); await settle();
             });
+            await test('the theme card holds the accent and AMOLED controls without a second conflicting section', async () => {
+                await reset('settings');
+                const copy = await page.locator('#content').innerText();
+                // One heading owns明暗/主题色/AMOLED; the old split into two sections read as a conflict.
+                assert.match(copy, /主题与外观/);
+                assert.equal((copy.match(/界面主题/g) || []).length, 1);
+                assert.match(copy, /主题色/);
+                assert.match(copy, /AMOLED/);
+                assert.doesNotMatch(copy, /外观与个性化/);
+                assert.equal(await page.locator('[data-setting="theme"]').count(), 1);
+                assert.equal(await page.locator('[data-toggle="amoled"]').count(), 1);
+            });
+            await test('a swatch previews the colour that is actually applied in the current theme', async () => {
+                await reset('settings');
+                const lightSwatch = await page.evaluate(() => {
+                    const b = [...document.querySelectorAll('.swatch')].find(x => x.dataset.seed === '#A65C83');
+                    return getComputedStyle(b).backgroundColor;
+                });
+                await page.selectOption('[data-setting="theme"]', 'dark');
+                await page.waitForFunction(() => document.body.classList.contains('dark'));
+                const darkSwatch = await page.evaluate(() => {
+                    const b = [...document.querySelectorAll('.swatch')].find(x => x.dataset.seed === '#A65C83');
+                    return getComputedStyle(b).backgroundColor;
+                });
+                // Dark mode lightens the accent, so the dot must change with the theme.
+                assert.notEqual(lightSwatch, darkSwatch);
+                await page.selectOption('[data-setting="theme"]', 'light'); await settle();
+            });
             await test('pasting a live or space link resolves the anchor', async () => {
                 await reset('anchors');
                 await page.locator('[data-action="addAnchor"]').click();
@@ -673,14 +720,28 @@ function installMock() {
             });
             await test('the background picture renders and can be removed', async () => {
                 await reset('settings');
-                await page.evaluate(async () => { __mock.state.backgroundSet = true; __mock.state.backgroundName = '夜色.png'; await window.refreshNative(true); });
+                await page.evaluate(async () => { __mock.state.backgroundSet = true; __mock.state.backgroundRevision = 'aa11'; __mock.state.backgroundName = '夜色.png'; await window.refreshNative(true); });
                 assert.equal(await page.evaluate(() => document.body.classList.contains('has-bg')), true);
                 const url = await page.evaluate(() => document.getElementById('bg-layer').style.backgroundImage);
                 assert.match(url, /\/background\/current/);
+                // The address must carry a revision, or every later picture would be served
+                // from the browser cache under the same URL.
+                assert.match(url, /\?v=aa11/);
                 await page.waitForFunction(() => { const i = document.getElementById('bg-layer'); const u = i && i.style.backgroundImage; return !!u; });
                 await page.locator('[data-action="removeBackground"]').click(); await settle();
                 assert.equal(await page.evaluate(() => __mock.removedBackground), true);
                 assert.equal(await page.evaluate(() => document.body.classList.contains('has-bg')), false);
+            });
+            await test('replacing the background changes the image address so the new picture loads', async () => {
+                await reset('settings');
+                await page.evaluate(async () => { __mock.state.backgroundSet = true; __mock.state.backgroundRevision = 'aa11'; await window.refreshNative(true); });
+                const first = await page.evaluate(() => document.getElementById('bg-layer').style.backgroundImage);
+                await page.locator('[data-action="pickBackground"]').first().click(); await settle();
+                await page.evaluate(async () => { __mock.state.backgroundRevision = 'bb22'; await window.refreshNative(true); });
+                const second = await page.evaluate(() => document.getElementById('bg-layer').style.backgroundImage);
+                assert.notEqual(first, second);
+                assert.match(second, /\?v=bb22/);
+                assert.equal(await page.evaluate(() => __mock.pickedBackground), true);
             });
             await test('picking a schedule image repaints the editor immediately', async () => {
                 await reset('anchors');
@@ -728,10 +789,10 @@ function installMock() {
                 assert.doesNotMatch(copy, /另一位主播/);
                 assert.match(copy, /灰泽满 Hazel/);
             });
-            await test('appearance section paints seed swatches and applies the picked accent', async () => {
+            await test('theme section paints seed swatches and applies the picked accent', async () => {
                 await reset('settings');
                 const copy = await page.locator('#content').innerText();
-                assert.match(copy, /外观与个性化/);
+                assert.match(copy, /主题与外观/);
                 assert.match(copy, /背景图片/);
                 assert.equal(await page.locator('.swatch').count(), 13);
                 await page.locator('[data-seed="#A65C83"]').click(); await settle();

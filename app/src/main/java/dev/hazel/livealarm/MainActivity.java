@@ -168,6 +168,10 @@ public class MainActivity extends Activity {
         Prefs.put(j,"alertMode",NotificationAccess.alertMode(this,prefs).name());Prefs.put(j,"overlayVisible",GuardianService.overlayVisible);
         Prefs.put(j,"watchNotification",NotificationAccess.watchState(this,prefs));
         Prefs.put(j,"backgroundName",prefs.raw().getString("backgroundName",""));Prefs.put(j,"backgroundSet",!prefs.raw().getString("backgroundPath","").isEmpty());
+        // Cache-busting revision for the stable /background/current address. The stored name is
+        // deliberately not exposed, so the page only sees a short digest of it.
+        String storedName=prefs.raw().getString("backgroundPath","");
+        Prefs.put(j,"backgroundRevision",storedName.isEmpty()?"0":Integer.toHexString(storedName.hashCode()));
         Prefs.put(j,"recoveryAt",prefs.raw().getLong("recoveryAt",0));
         Prefs.put(j,"version",versionName());Prefs.put(j,"android",Build.VERSION.RELEASE);Prefs.put(j,"manufacturer",Build.MANUFACTURER);Prefs.put(j,"xiaomi",NotificationAccess.isXiaomi());Prefs.put(j,"preview",false);return j;
     }
@@ -178,7 +182,7 @@ public class MainActivity extends Activity {
     private String versionName(){
         try{String name=getPackageManager().getPackageInfo(getPackageName(),0).versionName;if(name!=null&&!name.isEmpty())return name;}
         catch(Exception ignored){}
-        return "1.1.3";
+        return "1.1.4";
     }
     private JSONObject permissions(){
         JSONObject p=new JSONObject();NotificationManager n=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
@@ -239,7 +243,13 @@ public class MainActivity extends Activity {
                 prefs.log("system",enable?"已开启守候":"已停止守候",enable?"开始按你的时间规则守候 "+targets+" 位主播":"不再自动检测或响铃");return state();
             }
             case "refresh":refresh();return "正在检测直播状态";
-            case "pickBackground":startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),PICK_BACKGROUND);return true;
+            case "pickBackground":{
+                // The answer must wait for the import: replying here would tell the page the
+                // background changed before the picker even opened, so a failed import looked
+                // like a success and the old picture stayed on screen.
+                pendingPickRequest=requestId;
+                startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),PICK_BACKGROUND);return DEFERRED;
+            }
             case "removeBackground":{
                 io.execute(()->{BackgroundStore.remove(this,prefs);runOnUiThread(()->{applyTheme();push();});});
                 return true;
@@ -268,7 +278,7 @@ public class MainActivity extends Activity {
                 final long uid=data.optLong("uid",0);
                 // Either a room (number/live link) or a uid (space link) is enough; a uid is
                 // mapped to its live room first, so both entry forms end in the same place.
-                if(room<=0&&uid<=0)throw new Exception("请填写直播间号码、直播间链接或主播主页链接");
+                if(room<=0&&uid<=0)throw new Exception("请填写主播 UID、主页链接或直播间链接");
                 String id=data.optString("id","");
                 final String anchorId=Anchors.validId(id)?id:UUID.randomUUID().toString();
                 // Two lookups plus the avatar have to run off the UI thread, so this action
@@ -563,6 +573,11 @@ public class MainActivity extends Activity {
             if(back!=null)reply(back,false,"未选择图片");
             return;
         }
+        if(request==PICK_BACKGROUND&&(result!=RESULT_OK||data==null||data.getData()==null)){
+            String back=pendingPickRequest;pendingPickRequest=null;
+            if(back!=null)reply(back,false,"未选择图片");
+            return;
+        }
         if(result!=RESULT_OK||data==null||data.getData()==null)return;
         Uri uri=data.getData();
         if(request==NOTIFICATION_REPORT||request==COMPONENT_REPORT){
@@ -592,11 +607,14 @@ public class MainActivity extends Activity {
             });return;
         }
         if(request==PICK_BACKGROUND){
+            final String back=pendingPickRequest;pendingPickRequest=null;
             toast("正在导入背景图片…");
             io.execute(()->{try{
                 BackgroundStore.importImage(getApplicationContext(),prefs,uri);
-                runOnUiThread(()->{applySecureFlag();applyTheme();push();toast("背景图片已保存");});
-            }catch(Exception e){runOnUiThread(()->toast("图片未导入："+errorText(e)));}});
+                runOnUiThread(()->{applySecureFlag();applyTheme();push();toast("背景图片已保存");if(back!=null)reply(back,true,Boolean.TRUE);});
+            }catch(Exception e){
+                runOnUiThread(()->{toast("图片未导入："+errorText(e));if(back!=null)reply(back,false,errorText(e));});
+            }});
         }
         if(request==AUDIO){toast("正在导入铃声…");io.execute(()->importAudio(uri));}
         if(request==EXPORT){String text=pendingExport;io.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException();out.write(text.getBytes("UTF-8"));runOnUiThread(()->toast("备份已导出；自选铃声文件不包含在备份中"));}catch(Exception e){runOnUiThread(()->toast("导出失败，请检查保存位置"));}});}

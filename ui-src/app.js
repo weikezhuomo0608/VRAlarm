@@ -7,7 +7,7 @@ const icon=(name,extra='')=>`<svg class="i ${extra}" viewBox="0 0 24 24" aria-hi
 let seq=0,awaiting=new Map(),native=typeof window.HazelNative!=='undefined',route='home',S=null,configFingerprint='',busy=false,ruleDraft=null,alarmPainted=false,zoneList=[];
 let compatibilityAction=null,compatibilitySaving=false,anchorDraft=null;
 const defaults={soundWithoutNotifications:false,allDay:true,timezone:'device',catchUp:false,pollSeconds:30,reliable:true,boot:true,ringtone:'starlight',customName:'未选择',volume:85,ramp:true,vibrate:true,duration:60,snoozeMinutes:5,quietCalls:true,theme:'light',preStream:true,ringQueue:false,aiOcr:true,aiKey:'',aiModel:'deepseek-flash',seedColor:'',amoled:false,hideRecents:false,recovery:true,backgroundDim:40,cardOpacity:94,windows:[{id:'night',name:'凌晨守候',start:60,end:360,days:127,enabled:true}]};
-const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.3',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
+const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.4',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
 if(!native)$('#preview').textContent='界面预览 · 检测与响铃功能请安装安卓应用体验';
 window.NativeReply=(id,result)=>{const p=awaiting.get(id);if(!p)return;clearTimeout(p.timer);awaiting.delete(id);result.ok?p.resolve(result.value):p.reject(new Error(result.error));};
 function api(action,data={},timeoutMs=10000){
@@ -25,6 +25,13 @@ function hexRgb(hex){return [parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5)
 function lumaRgb(rgb){return (0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2])/255;}
 function mixRgb(a,b,t){return [0,1,2].map(i=>Math.round(a[i]+(b[i]-a[i])*t));}
 function cssRgb(rgb){return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;}
+/** A swatch must show the colour that will really be applied, not the raw seed: dark mode
+ *  lightens the accent, so the plain seed would promise a shade the user never sees. */
+function seedSwatch(hex,config){
+    const seed=hexRgb(hex);
+    const night=config.theme==='dark'||(config.theme==='system'&&typeof matchMedia==='function'&&matchMedia('(prefers-color-scheme:dark)').matches);
+    return night?cssRgb(mixRgb(seed,[255,255,255],.5)):cssRgb(seed);
+}
 let systemThemeBound=false;
 // Writing theme variables on <html> alone loses to the body.dark stylesheet rule, because
 // every card resolves its custom properties from the nearest ancestor that sets them. Both
@@ -62,7 +69,13 @@ function applyTheme(){const c=S.config,night=c.theme==='dark'||(c.theme==='syste
     setVar('--card',`rgba(${base[0]},${base[1]},${base[2]},${op})`);
     const layer=document.getElementById('bg-layer');
     if(layer){
-        if(S.backgroundSet){layer.style.backgroundImage='url(/background/current)';document.body.classList.add('has-bg');}
+        // The address is stable, so the browser would keep serving the first decoded image for
+        // every later pick. A revision suffix is appended so each import becomes a new URL.
+        if(S.backgroundSet){
+            const stamp=S.backgroundRevision||S.backgroundSet;
+            layer.style.backgroundImage=`url(/background/current?v=${stamp})`;
+            document.body.classList.add('has-bg');
+        }
         else{layer.style.backgroundImage='';document.body.classList.remove('has-bg');}
         setVar('--bg-dim',String(Math.min(90,Math.max(0,Number(c.backgroundDim)||0))/100));
     }
@@ -157,15 +170,15 @@ function anchorsPage(){
             <div class="anchor-switches"><span class="mini">检测${sw('anchor:'+a.id,a.enabled,a.name+' 的检测开关')}</span><span class="mini">响铃${sw('ring:'+a.id,a.alarm!==false,a.name+' 的响铃开关')}</span></div></div>
             <div class="rule-footer anchor-footer"><small class="muted">${a.snapshot&&a.snapshot.checkedAt?`<span class="nowrap">上次检测 ${stamp(a.snapshot.checkedAt)}</span>`:'<span class="nowrap">尚未检测</span>'}${a.stats&&a.stats.count30!==undefined?` · <span class="nowrap">本周 ${a.stats.count7} 场</span> · <span class="nowrap">近 30 天 ${a.stats.count30} 场</span>`:''}</small><div class="anchor-actions"><button class="text-button" data-anchor-schedule="${esc(a.id)}">周表 ${(a.schedule||[]).length?`<span class="muted">${a.schedule.length}</span>`:''} ${icon('calendar')}</button><button class="text-button" data-anchor-edit="${esc(a.id)}">编辑 ${icon('pencil')}</button><button class="text-button" data-anchor-open="${esc(a.id)}">直播间 ${icon('external')}</button><button class="text-button" data-anchor-profile="${esc(a.id)}">空间 ${icon('external')}</button></div></div></article>`;
     }).join('');
-    html+=`<button class="add-rule" data-action="addAnchor">${icon('plus')}添加主播</button><p class="hint">${icon('info')} 填写直播间号码，或直接粘贴直播间/主页链接，应用会自己认出是哪个直播间并读取名称与头像。头像只保存在本机；识别不到时也可以自己填名称。「检测」关掉后不再检测这位主播；「响铃」关掉后照常检测、时间线照常亮起，只是不吵你。</p>`;
+    html+=`<button class="add-rule" data-action="addAnchor">${icon('plus')}添加主播</button><p class="hint">${icon('info')} 推荐填写<strong>主播 UID</strong>（主页地址 space.bilibili.com 后的数字，如 1298779265），也可以粘贴主页链接或直播间链接，应用会自动找到对应直播间并读取名称与头像。头像只保存在本机；识别不到时也可以自己填名称。「检测」关掉后不再检测这位主播；「响铃」关掉后照常检测、时间线照常亮起，只是不吵你。</p>`;
     $('#content').innerHTML=html;
 }
 function editAnchor(id){
     const existing=(S.anchors||[]).find(a=>a.id===id)||null;
-    anchorDraft=existing?{id:existing.id,name:existing.name,uid:existing.uid,room:existing.room,enabled:existing.enabled,alarm:existing.alarm!==false,avatar:!!existing.avatar}
-                        :{id:'',name:'',uid:0,room:'',enabled:true,alarm:true,avatar:false};
+    anchorDraft=existing?{id:existing.id,name:existing.name,uid:existing.uid,room:existing.room,resolvedRoom:existing.room,enabled:existing.enabled,alarm:existing.alarm!==false,avatar:!!existing.avatar}
+                        :{id:'',name:'',uid:0,room:'',resolvedRoom:0,enabled:true,alarm:true,avatar:false};
     const d=anchorDraft;
-    openModal(existing?'编辑主播':'添加主播',`<label class="form-label" for="anchor-room">直播间号码或链接</label><input class="input" id="anchor-room" maxlength="80" value="${esc(String(d.room||''))}" placeholder="号码 1713546334，或粘贴直播间/主页链接"><button class="secondary" data-action="resolveAnchor" style="margin-top:12px">${icon('refresh')}识别主播信息</button><button class="secondary" data-action="refreshAvatar" style="margin-top:10px">${icon('download')}重新下载头像</button><div id="anchor-preview"></div><label class="form-label" for="anchor-name">主播名称</label><input class="input" id="anchor-name" maxlength="40" value="${esc(d.name)}" placeholder="识别后自动填写"><div class="setting-row"><div class="grow"><h3>开播响铃</h3><p class="sub">关闭后仍检测并显示在时间线，但不响铃</p></div>${sw('draftAlarm',d.alarm!==false,'开播响铃开关')}</div><p class="hint">可以直接粘贴主播的直播间链接（live.bilibili.com/…）、主页链接（space.bilibili.com/…）或只填号码，应用会自己认出是哪个直播间。名称会显示在提醒通知里；改动号码后需要重新识别，避免认错主播。</p><div class="form-error" id="anchor-error"></div>`,`<div class="sheet-actions">${existing?'<button class="secondary outline" data-action="deleteAnchor">删除主播</button>':'<button class="secondary outline" data-action="closeModal">取消</button>'}<button class="primary" data-action="saveAnchorDraft">保存主播</button></div>`);
+    openModal(existing?'编辑主播':'添加主播',`<label class="form-label" for="anchor-room">主播 UID（推荐）或直播间链接</label><input class="input" id="anchor-room" maxlength="80" value="${esc(String(d.room||''))}" placeholder="例如 1298779265，或粘贴 space/live 链接"><button class="secondary" data-action="resolveAnchor" style="margin-top:12px">${icon('refresh')}识别主播信息</button><button class="secondary" data-action="refreshAvatar" style="margin-top:10px">${icon('download')}重新下载头像</button><div id="anchor-preview"></div><label class="form-label" for="anchor-name">主播名称</label><input class="input" id="anchor-name" maxlength="40" value="${esc(d.name)}" placeholder="识别后自动填写"><div class="setting-row"><div class="grow"><h3>开播响铃</h3><p class="sub">关闭后仍检测并显示在时间线，但不响铃</p></div>${sw('draftAlarm',d.alarm!==false,'开播响铃开关')}</div><p class="hint">推荐填<strong>主播 UID</strong>（主页地址 space.bilibili.com 后面那串数字，例如 1298779265），也可直接粘贴主播的主页链接；应用会自动找到对应直播间。直播间链接（live.bilibili.com/…）同样可用，但换直播间后需要重新识别。名称会显示在提醒通知里；改动号码后需要重新识别，避免认错主播。</p><div class="form-error" id="anchor-error"></div>`,`<div class="sheet-actions">${existing?'<button class="secondary outline" data-action="deleteAnchor">删除主播</button>':'<button class="secondary outline" data-action="closeModal">取消</button>'}<button class="primary" data-action="saveAnchorDraft">保存主播</button></div>`);
     paintAnchorPreview();
 }
 function paintAnchorPreview(){
@@ -173,31 +186,35 @@ function paintAnchorPreview(){
     const d=anchorDraft;
     box.innerHTML=d.room?`<div class="anchor-preview">${anchorArt(d)}<div class="grow"><strong>${esc(d.name||'尚未识别')}</strong><small class="sub">${d.uid?`<span class="nowrap">UID ${esc(String(d.uid))}</span> · <span class="nowrap">直播间 ${esc(String(d.room))}</span>`:'请先点“识别主播信息”'}</small></div></div>`:'';
 }
-/** Accepts a room number, a live link, a space link, or "UID 12345"; bare digits are rooms. */
+/** Accepts a UID, a space link, a live link or a room number. Bare digits are read as a UID,
+ *  because that is the form the page asks for and it is the stable id across rooms. */
 function parseAnchorInput(raw){
     const text=String(raw||'').trim();
     if(!text)return null;
-    let m=text.match(/live\.bilibili\.com\/(?:blanc\/)?(\d{2,12})/i);
-    if(m)return {room:Number(m[1])};
-    m=text.match(/space\.bilibili\.com\/(\d{2,15})/i);
+    let m=text.match(/space\.bilibili\.com\/(\d{2,15})/i);
     if(m)return {uid:Number(m[1])};
     m=text.match(/^(?:uid|UID)\s*[:：]?\s*(\d{2,15})$/);
     if(m)return {uid:Number(m[1])};
-    if(/^\d{2,15}$/.test(text))return {room:Number(text)};
+    m=text.match(/live\.bilibili\.com\/(?:blanc\/)?(\d{2,12})/i);
+    if(m)return {room:Number(m[1])};
+    if(/^\d{2,15}$/.test(text))return {uid:Number(text)};
     return null;
 }
 async function resolveAnchorDraft(){
     const error=$('#anchor-error');if(error)error.textContent='';
     const button=$('#modal [data-action="resolveAnchor"]');
     const parsed=parseAnchorInput($('#anchor-room').value);
-    if(!parsed){if(error)error.textContent='请填写直播间号码、直播间链接（live.bilibili.com/…）或主播主页链接';return;}
+    if(!parsed){if(error)error.textContent='请填写主播 UID（如 1298779265）、主页链接，或直播间链接（live.bilibili.com/…）';return;}
     const room=parsed.room||0;
     // Two lookups plus the avatar download: give it longer than the default bridge timeout.
     if(button){button.disabled=true;button.textContent='正在识别…';}
     try{
         const found=await api('resolveAnchor',{room,uid:parsed.uid||0,id:anchorDraft.id},60000);
-        anchorDraft={...anchorDraft,...found};
-        $('#anchor-name').value=found.name||'';$('#anchor-room').value=String(found.room);
+        anchorDraft={...anchorDraft,...found,resolvedRoom:Number(found.room)||0};
+        $('#anchor-name').value=found.name||'';
+        // Keep what the user typed when it was a uid: replacing it with the room number would
+        // make the field look like it ignored the uid they just entered.
+        $('#anchor-room').value=parsed.uid?String(parsed.uid):String(found.room);
         paintAnchorPreview();
         toast(found.avatar?'已识别主播名称与头像':'已识别主播名称，头像未能读取');
     }catch(e){if(error)error.textContent=e.message;}
@@ -211,7 +228,7 @@ async function refreshAvatarDraft(){
     try{
         // Same resolution as 识别主播信息, but keyed to the stored room so it only refreshes art.
         const found=await api('resolveAnchor',{room:anchorDraft.room,id:anchorDraft.id},40000);
-        anchorDraft={...anchorDraft,...found};
+        anchorDraft={...anchorDraft,...found,resolvedRoom:Number(found.room)||0};
         $('#anchor-name').value=found.name||$('#anchor-name').value;paintAnchorPreview();
         toast(found.avatar?'头像已更新':'未能获取头像，稍后可再试');
     }catch(e){if(error)error.textContent=e.message;}
@@ -221,13 +238,15 @@ async function saveAnchorDraft(){
     const error=$('#anchor-error');if(error)error.textContent='';
     try{
         const parsed=parseAnchorInput($('#anchor-room').value),name=($('#anchor-name').value||'').trim();
-        if(!parsed)throw new Error('请填写直播间号码或粘贴直播间/主页链接');
-        const room=anchorDraft.uid&&!parsed.room?Number(anchorDraft.room):(parsed.room||Number(anchorDraft.room));
-        if(!Number.isFinite(room)||room<=0)throw new Error('请先点“识别主播信息”，确认是这个直播间');
+        if(!parsed)throw new Error('请填写主播 UID 或直播间链接');
+        // The resolved identity is whatever was recognised last; the typed value must not have
+        // moved away from it, or the uid would be attached to a different room.
+        const resolvedRoom=Number(anchorDraft.resolvedRoom||anchorDraft.room||0);
+        const typedRoom=parsed.room?Number(parsed.room):0;
+        if(typedRoom>0&&typedRoom!==resolvedRoom)throw new Error('请先点“识别主播信息”，确认是这个直播间');
+        if(!anchorDraft.uid||resolvedRoom<=0)throw new Error('请先点“识别主播信息”，确认是这个直播间');
         if(!name)throw new Error('请填写主播名称');
-        // A changed room invalidates the resolved identity, so the uid cannot be reused.
-        if(!anchorDraft.uid||Number(anchorDraft.room)!==room)throw new Error('请先点“识别主播信息”，确认是这个直播间');
-        await putAnchor({id:anchorDraft.id,name,uid:anchorDraft.uid,room,enabled:anchorDraft.enabled,alarm:anchorDraft.alarm!==false});
+        await putAnchor({id:anchorDraft.id,name,uid:anchorDraft.uid,room:resolvedRoom,enabled:anchorDraft.enabled,alarm:anchorDraft.alarm!==false});
         closeModal();toast('主播已保存');
     }catch(e){if(error)error.textContent=e.message;}
 }
@@ -450,7 +469,7 @@ function sound(){const c=S.config;let html=heading('MAKE IT YOURS','这一声，
     $('#content').innerHTML=html;
 }
 function settings(){const c=S.config,p=S.permissions,rows=[['notifications','bell','允许通知',p.notifications?'系统已允许发送通知':p.notificationPolicy==='revoked'?'系统策略拒绝授权，点按查看排查方法':p.notificationMismatch?'授权状态尚未一致，请打开系统通知设置检查':p.notificationRuntime===false?'请允许系统通知授权，并开启应用通知':'接收开播提醒与守候状态',p.notifications],['alarmChannel','sound','开播强提醒通道','请保留横幅与锁屏显示',p.alarmChannel],['fullScreen','screen','全屏提醒','锁屏时显示可操作的提醒页面',p.fullScreen],['battery','battery','后台电池权限','允许后台运行，减少检测中断',p.battery],['exact','clock','精确闹钟','用于时段边界、暂缓与锁屏测试',p.exact],['accessibility','shield','无障碍守候辅助（可选）',p.accessibilityConnected?'已连接；系统清理本应用后由系统重新拉起并恢复守候':'不读取屏幕；从最近任务划掉后恢复最快的一条路',p.accessibility],['dnd','moon','勿扰模式','如使用勿扰，请在系统中允许闹钟',!p.dnd]];
-    let html=heading('A RELIABLE LITTLE WATCH','把每次提醒，照顾好。','权限是否允许，由你的手机最终决定。')+`<div class="section-label"><h2>权限检查</h2><small>点按可进入系统设置</small></div><section class="card permissions-card">${rows.map(([key,i,name,desc,ok])=>`<button class="permission-row" data-permission="${key}">${icon(i)}<span class="grow"><strong>${name}</strong><small>${desc}</small></span><span class="badge ${ok?'':'warn'}">${key==='dnd'?(ok?'未开启':'请检查'):(ok?'已就绪':key==='notifications'&&p.notificationPolicy==='revoked'?'策略限制':'去设置')}</span><span class="chevron">›</span></button>`).join('')}</section><div class="permission-actions"><button class="text-button" data-permission="notificationSettings">打开系统通知设置 ${icon('external')}</button><button class="text-button" data-action="recheckPermissions">重新检查 ${icon('refresh')}</button></div><div class="card warning"><p>小米 / Redmi、华为、荣耀、OPPO、vivo 等手机，还可能需要在系统中允许自启动，把后台电池策略设为“不限制”，并在最近任务里长按本应用的卡片将它锁定。无法由应用自动验证。</p><p class="hint" style="margin-top:5px">荣耀 MagicOS：设置 → 应用和服务 → 应用启动管理，找到VR闹钟，关闭“自动管理”后勾选允许自启动、允许关联启动、允许后台活动。</p><button class="text-button" data-permission="app" style="margin-top:5px">打开应用系统设置 ${icon('arrow')}</button></div><div class="section-label"><h2>AI 图片识别（周表）</h2></div><section class="card">${setting('AI 识别周表图片','上传周表图片后可让 AI 自动提取安排；图片会上传到你配置的 AI 服务商处理，默认开启，可随时关闭。',sw('aiOcr',c.aiOcr!==false,'AI 图片识别'))}<div class="setting-row"><div class="grow"><h3>接口密钥</h3><p class="sub">DeepSeek 兼容接口；仅保存在本机</p></div></div><input class="input" data-setting="aiKey" value="${esc(c.aiKey||'')}" placeholder="sk-…" style="margin-top:6px"><div class="setting-row"><div class="grow"><h3>模型</h3><p class="sub">需要支持图片输入，例如 deepseek-flash</p></div></div><input class="input" data-setting="aiModel" value="${esc(c.aiModel||'deepseek-flash')}" style="margin-top:6px"></section><div class="section-label"><h2>小米与通知兼容</h2></div><section class="card">${setting('通知异常时仍响铃','通知未获准时，继续按时段检测并播放闹铃。通知栏与锁屏卡片可能不显示。',sw('soundWithoutNotifications',c.soundWithoutNotifications,'通知异常时仍响铃'))}<button class="permission-row" data-permission="overlay">${icon('screen')}<span class="grow"><strong>悬浮关闭按钮 · 可选</strong><small>仅响铃时显示，方便在其他应用上关闭闹铃。</small></span><span class="badge ${p.overlay?'':'warn'}">${p.overlay?'已就绪':'去设置'}</span></button></section><div class="section-label"><h2>后台守候</h2></div>${watchNoticeCard()}<section class="card">${setting('优先保证提醒','提醒时段内保持持续检测，更耗电；长时间守候建议接通电源。',sw('reliable',c.reliable,'优先保证提醒'))}${setting('检测间隔','网络异常会逐步放慢重试；时段外约 3 分钟检查一次。',select('pollSeconds',c.pollSeconds,[[15,'15 秒'],[30,'30 秒'],[60,'60 秒'],[120,'120 秒']]))}${setting('重启后恢复守候','仅恢复此前已开启的守候；仍受系统自启动限制。',sw('boot',c.boot,'重启后恢复守候'))}${setting('定时恢复检查','约每 15 分钟确认守候服务是否还活着，中断时自动拉起；不影响正常检测节奏，系统休眠时可能推迟。',sw('recovery',c.recovery!==false,'定时恢复检查'))}${S.recoveryAt?`<p class="sub" style="padding:0 4px 10px;margin-top:-8px">已安排恢复检查 · ${stamp(S.recoveryAt)}</p>`:''}${setting('从最近任务隐藏缩略图','最近任务卡片里隐藏应用内容，减少误划与窥屏；不影响提醒功能。',sw('hideRecents',c.hideRecents,'隐藏最近任务缩略图'))}</section><section class="card">${setting('界面主题','选择舒服的明暗。',select('theme',c.theme,[['light','奶白'],['dark','夜色'],['system','跟随系统']]))}</section><div class="section-label"><h2>外观与个性化</h2><small>配色方案与背景图片</small></div><section class="card"><div class="setting-row"><div class="grow"><h3>主题色</h3><p class="sub">${c.seedColor?'当前 '+esc(c.seedColor):'使用内置蓝灰配色'}</p></div></div><div class="swatches">${[['','#516b82'],['#A65C83','#A65C83'],['#6D7DB4','#6D7DB4'],['#4F7FA4','#4F7FA4'],['#447A6A','#447A6A'],['#88743C','#88743C'],['#B36A46','#B36A46'],['#9865AB','#9865AB'],['#B85872','#B85872'],['#536B81','#536B81'],['#6D7650','#6D7650'],['#B2748C','#B2748C'],['#655C74','#655C74']].map(([hex,bg])=>`<button class="swatch ${(c.seedColor||'')===hex?'selected':''}" style="background:${bg}" aria-label="主题色 ${hex||'默认'}" data-seed="${hex}">${(c.seedColor||'')===hex?'✓':''}</button>`).join('')}</div><input class="input" data-setting="seedColor" value="${esc(c.seedColor||'')}" placeholder="留空使用默认，或输入 #536B81" style="margin-top:10px">${setting('AMOLED 纯黑模式','深色主题使用纯黑底色；自选背景仍按你的设置显示。',sw('amoled',c.amoled,'AMOLED 纯黑模式'))}</section><div class="section-label"><h2>背景图片</h2><small>只读取你选择的图片，不需要访问整个相册</small></div><section class="card"><div class="setting-row"><div class="grow"><h3>${S.backgroundSet?'已设置背景':'还没有设置背景'}</h3><p class="sub">${S.backgroundSet?esc(S.backgroundName||'自选背景'):'选择一张喜欢的图片作为应用背景'}</p></div></div><div class="bg-actions"><button class="secondary" data-action="pickBackground">选择图片</button>${S.backgroundSet?'<button class="secondary outline" data-action="removeBackground">移除背景</button>':''}</div><div class="slider-row"><div class="grow"><h3>背景遮罩</h3><p class="sub">压暗背景，保证文字可读</p></div><span class="muted">${c.backgroundDim||0}%</span></div><input aria-label="背景遮罩百分比" class="volume-track" type="range" min="0" max="90" value="${c.backgroundDim||0}" data-setting="backgroundDim" style="margin:8px 0 2px"><div class="slider-row"><div class="grow"><h3>卡片不透明度</h3><p class="sub">越低透出的背景越多</p></div><span class="muted">${c.cardOpacity||94}%</span></div><input aria-label="卡片不透明度百分比" class="volume-track" type="range" min="75" max="100" value="${c.cardOpacity||94}" data-setting="cardOpacity" style="margin:8px 0 2px"><p class="hint" style="margin:8px 0 0">支持 JPG、PNG、WebP，最大 20 MB。图片复制并缩放后只保存在应用内；备份不包含背景图片。</p></section><div class="section-label"><h2>数据与帮助</h2></div><section class="card" style="padding-top:5px;padding-bottom:5px">${[['notificationHelp','bell','通知授权帮助'],['notificationReport','download','导出通知排查包'],['testDialog','shield','锁屏与响铃测试'],['export','download','导出设置与诊断记录'],['import','upload','从备份恢复设置'],['privacy','info','隐私与使用说明']].map(([action,i,label])=>`<button class="plain-row" data-action="${action}">${icon(i)}<span>${label}</span><span class="chevron">›</span></button>`).join('')}</section><p class="footnote">VR闹钟 ${esc(S.version)} · 本机守候 ${enabledAnchors().length} 位主播<br>主播可在“主播”页随时增删或关闭<br>非哔哩哔哩或主播官方应用</p>`;
+    let html=heading('A RELIABLE LITTLE WATCH','把每次提醒，照顾好。','权限是否允许，由你的手机最终决定。')+`<div class="section-label"><h2>权限检查</h2><small>点按可进入系统设置</small></div><section class="card permissions-card">${rows.map(([key,i,name,desc,ok])=>`<button class="permission-row" data-permission="${key}">${icon(i)}<span class="grow"><strong>${name}</strong><small>${desc}</small></span><span class="badge ${ok?'':'warn'}">${key==='dnd'?(ok?'未开启':'请检查'):(ok?'已就绪':key==='notifications'&&p.notificationPolicy==='revoked'?'策略限制':'去设置')}</span><span class="chevron">›</span></button>`).join('')}</section><div class="permission-actions"><button class="text-button" data-permission="notificationSettings">打开系统通知设置 ${icon('external')}</button><button class="text-button" data-action="recheckPermissions">重新检查 ${icon('refresh')}</button></div><div class="card warning"><p>小米 / Redmi、华为、荣耀、OPPO、vivo 等手机，还可能需要在系统中允许自启动，把后台电池策略设为“不限制”，并在最近任务里长按本应用的卡片将它锁定。无法由应用自动验证。</p><p class="hint" style="margin-top:5px">荣耀 MagicOS：设置 → 应用和服务 → 应用启动管理，找到VR闹钟，关闭“自动管理”后勾选允许自启动、允许关联启动、允许后台活动。</p><button class="text-button" data-permission="app" style="margin-top:5px">打开应用系统设置 ${icon('arrow')}</button></div><div class="section-label"><h2>AI 图片识别（周表）</h2></div><section class="card">${setting('AI 识别周表图片','上传周表图片后可让 AI 自动提取安排；图片会上传到你配置的 AI 服务商处理，默认开启，可随时关闭。',sw('aiOcr',c.aiOcr!==false,'AI 图片识别'))}<div class="setting-row"><div class="grow"><h3>接口密钥</h3><p class="sub">DeepSeek 兼容接口；仅保存在本机</p></div></div><input class="input" data-setting="aiKey" value="${esc(c.aiKey||'')}" placeholder="sk-…" style="margin-top:6px"><div class="setting-row"><div class="grow"><h3>模型</h3><p class="sub">需要支持图片输入，例如 deepseek-flash</p></div></div><input class="input" data-setting="aiModel" value="${esc(c.aiModel||'deepseek-flash')}" style="margin-top:6px"></section><div class="section-label"><h2>小米与通知兼容</h2></div><section class="card">${setting('通知异常时仍响铃','通知未获准时，继续按时段检测并播放闹铃。通知栏与锁屏卡片可能不显示。',sw('soundWithoutNotifications',c.soundWithoutNotifications,'通知异常时仍响铃'))}<button class="permission-row" data-permission="overlay">${icon('screen')}<span class="grow"><strong>悬浮关闭按钮 · 可选</strong><small>仅响铃时显示，方便在其他应用上关闭闹铃。</small></span><span class="badge ${p.overlay?'':'warn'}">${p.overlay?'已就绪':'去设置'}</span></button></section><div class="section-label"><h2>后台守候</h2></div>${watchNoticeCard()}<section class="card">${setting('优先保证提醒','提醒时段内保持持续检测，更耗电；长时间守候建议接通电源。',sw('reliable',c.reliable,'优先保证提醒'))}${setting('检测间隔','网络异常会逐步放慢重试；时段外约 3 分钟检查一次。',select('pollSeconds',c.pollSeconds,[[15,'15 秒'],[30,'30 秒'],[60,'60 秒'],[120,'120 秒']]))}${setting('重启后恢复守候','仅恢复此前已开启的守候；仍受系统自启动限制。',sw('boot',c.boot,'重启后恢复守候'))}${setting('定时恢复检查','约每 15 分钟确认守候服务是否还活着，中断时自动拉起；不影响正常检测节奏，系统休眠时可能推迟。',sw('recovery',c.recovery!==false,'定时恢复检查'))}${S.recoveryAt?`<p class="sub" style="padding:0 4px 10px;margin-top:-8px">已安排恢复检查 · ${stamp(S.recoveryAt)}</p>`:''}${setting('从最近任务隐藏缩略图','最近任务卡片里隐藏应用内容，减少误划与窥屏；不影响提醒功能。',sw('hideRecents',c.hideRecents,'隐藏最近任务缩略图'))}</section><div class="section-label"><h2>主题与外观</h2><small>明暗、主题色与背景</small></div><section class="card">${setting('界面主题','选择舒服的明暗；「跟随系统」会随手机的深色模式实时变化。',select('theme',c.theme,[['light','奶白'],['dark','夜色'],['system','跟随系统']]))}${setting('AMOLED 纯黑模式','仅「夜色」主题生效：底色改为纯黑。奶白主题下此项不生效。',sw('amoled',c.amoled,'AMOLED 纯黑模式'))}<div class="setting-row"><div class="grow"><h3>主题色</h3><p class="sub">${c.seedColor?'当前 '+esc(c.seedColor):'使用内置蓝灰配色'}</p></div></div><div class="swatches">${[['','#516b82'],['#A65C83',seedSwatch('#A65C83',c)],['#6D7DB4',seedSwatch('#6D7DB4',c)],['#4F7FA4',seedSwatch('#4F7FA4',c)],['#447A6A',seedSwatch('#447A6A',c)],['#88743C',seedSwatch('#88743C',c)],['#B36A46',seedSwatch('#B36A46',c)],['#9865AB',seedSwatch('#9865AB',c)],['#B85872',seedSwatch('#B85872',c)],['#536B81',seedSwatch('#536B81',c)],['#6D7650',seedSwatch('#6D7650',c)],['#B2748C',seedSwatch('#B2748C',c)],['#655C74',seedSwatch('#655C74',c)]].map(([hex,bg])=>`<button class="swatch ${(c.seedColor||'')===hex?'selected':''}" style="background:${bg}" aria-label="主题色 ${hex||'默认'}" data-seed="${hex}">${(c.seedColor||'')===hex?'✓':''}</button>`).join('')}</div><input class="input" data-setting="seedColor" value="${esc(c.seedColor||'')}" placeholder="留空使用默认，或输入 #536B81" style="margin-top:10px"><p class="hint" style="margin:6px 0 0">圆点已按当前主题显示实际生效的颜色。</p></section><div class="section-label"><h2>背景图片</h2><small>只读取你选择的图片，不需要访问整个相册</small></div><section class="card"><div class="setting-row"><div class="grow"><h3>${S.backgroundSet?'已设置背景':'还没有设置背景'}</h3><p class="sub">${S.backgroundSet?esc(S.backgroundName||'自选背景'):'选择一张喜欢的图片作为应用背景'}</p></div></div><div class="bg-actions"><button class="secondary" data-action="pickBackground">${S.backgroundSet?'更换图片':'选择图片'}</button>${S.backgroundSet?'<button class="secondary outline" data-action="removeBackground">移除背景</button>':''}</div><div class="slider-row"><div class="grow"><h3>背景遮罩</h3><p class="sub">压暗背景，保证文字可读</p></div><span class="muted">${c.backgroundDim||0}%</span></div><input aria-label="背景遮罩百分比" class="volume-track" type="range" min="0" max="90" value="${c.backgroundDim||0}" data-setting="backgroundDim" style="margin:8px 0 2px"><div class="slider-row"><div class="grow"><h3>卡片不透明度</h3><p class="sub">越低透出的背景越多</p></div><span class="muted">${c.cardOpacity||94}%</span></div><input aria-label="卡片不透明度百分比" class="volume-track" type="range" min="75" max="100" value="${c.cardOpacity||94}" data-setting="cardOpacity" style="margin:8px 0 2px"><p class="hint" style="margin:8px 0 0">支持 JPG、PNG、WebP，最大 20 MB。图片复制并缩放后只保存在应用内；备份不包含背景图片。</p></section><div class="section-label"><h2>数据与帮助</h2></div><section class="card" style="padding-top:5px;padding-bottom:5px">${[['notificationHelp','bell','通知授权帮助'],['notificationReport','download','导出通知排查包'],['testDialog','shield','锁屏与响铃测试'],['export','download','导出设置与诊断记录'],['import','upload','从备份恢复设置'],['privacy','info','隐私与使用说明']].map(([action,i,label])=>`<button class="plain-row" data-action="${action}">${icon(i)}<span>${label}</span><span class="chevron">›</span></button>`).join('')}</section><p class="footnote">VR闹钟 ${esc(S.version)} · 本机守候 ${enabledAnchors().length} 位主播<br>主播可在“主播”页随时增删或关闭<br>非哔哩哔哩或主播官方应用</p>`;
     if(p.powerSave)html=`<div class="card warning"><p>手机当前处于省电模式，后台提醒可能延迟。</p></div>`+html;
     $('#content').innerHTML=html;
 }
@@ -529,8 +548,9 @@ async function perform(action,anchorId=''){
     if(action==='saveAnchorDraft'){await saveAnchorDraft();return;}
     if(action==='deleteAnchor'){askDeleteAnchor();return;}
     if(action==='pickBackground'){
-        // The picker answers immediately; the import lands later and pushes fresh state.
-        try{await api('pickBackground',{},60000);toast('已选择图片，正在导入…');}
+        // The native side answers only after the chosen picture has been imported, so a
+        // cancelled or failed pick is reported here instead of looking like a success.
+        try{await api('pickBackground',{},120000);await window.refreshNative(true);toast('背景图片已更新');}
         catch(e){toast(e.message);}
         return;
     }

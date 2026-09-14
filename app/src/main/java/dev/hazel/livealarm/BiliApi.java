@@ -54,9 +54,15 @@ public final class BiliApi {
     public static long roomOfUid(long uid)throws IOException{
         try{
             JSONObject d=request("https://api.live.bilibili.com/live_user/v1/Master/info?uid="+uid,"https://space.bilibili.com/"+uid);
-            JSONObject info=d.optJSONObject("info");
-            long room=info==null?0:info.optLong("room_id",0);
-            if(room<=0)throw new ApiException("这个账号还没有开通直播间，请改用直播间号码或直播间链接",false);
+            // The live room is published at data.room_id; the nested data.info object only holds
+            // the user profile and has no room_id. Reading info.room_id made every uid look like
+            // an account without a live room.
+            long room=d.optLong("room_id",0);
+            if(room<=0){
+                JSONObject info=d.optJSONObject("info");
+                room=info==null?0:info.optLong("room_id",0);
+            }
+            if(room<=0)throw new ApiException("这个 UID 还没有开通直播间，请改用直播间链接",false);
             return room;
         }catch(ApiException e){
             if(e.rateLimited)throw e;

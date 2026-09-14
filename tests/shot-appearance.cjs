@@ -36,6 +36,12 @@ server.listen(0,'127.0.0.1',async()=>{
         const layer=document.getElementById('bg-layer');layer.style.backgroundImage=bg;},fakeBg);
     await page.waitForTimeout(200);
     await page.screenshot({path:path.join(outDir,'shot-appearance-dark.png')});
+    // The add-anchor dialog, to check that the uid-first wording and placeholder read clearly.
+    await page.evaluate(()=>{S.config.theme='light';S.config.amoled=false;route='anchors';render();});
+    await page.waitForTimeout(150);
+    await page.locator('[data-action="addAnchor"]').click();
+    await page.waitForTimeout(150);
+    await page.screenshot({path:path.join(outDir,'shot-anchor-add.png')});
     await browser.close();
     console.log('saved shots');
     server.close();process.exit(0);
