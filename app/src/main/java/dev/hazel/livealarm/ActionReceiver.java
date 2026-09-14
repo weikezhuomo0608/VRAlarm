@@ -31,9 +31,12 @@ public class ActionReceiver extends BroadcastReceiver {
         }
         if(AlarmScheduler.PRESTREAM.equals(action)){
             if(!p.enabled())return;
-            long at=p.raw().getLong("preStreamAt",0);
-            // A stale fire (device slept past it) stays silent; the next cycle re-arms anyway.
-            if(at>0&&System.currentTimeMillis()-at<120000L)GuardianService.preStreamNotice(context);
+            long startAt=p.raw().getLong("preStreamAt",0);
+            // The alarm is armed for start minus the lead, so freshness is measured against that
+            // moment: a fire the device slept through stays silent instead of announcing a stream
+            // that has already begun. The next cycle re-arms anyway.
+            long armedFor=startAt-PollPlan.PRESTREAM_LEAD_MILLIS;
+            if(startAt>0&&armedFor>0&&System.currentTimeMillis()-armedFor<120000L)GuardianService.preStreamNotice(context);
             return;
         }
         if(AlarmScheduler.SNOOZE.equals(action)){if(p.enabled()&&p.raw().getLong("snoozeAt",0)>0)GuardianService.send(context,action);return;}

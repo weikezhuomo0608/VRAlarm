@@ -29,9 +29,10 @@ public class WatchWidget extends AppWidgetProvider {
         v.setTextViewText(R.id.widget_live,live.length()>0?"🔴 正在直播："+live:"⚪ 暂未开播");
         long preAt=p.raw().getLong("preStreamAt",0);
         String preName=p.raw().getString("preStreamName","");
+        // preStreamAt is the scheduled start itself, so it is printed without re-adding the lead.
         boolean upcoming=enabled&&preAt>System.currentTimeMillis();
         v.setTextViewText(R.id.widget_next,upcoming
-            ?"周表预告："+preName+" "+fmt(c,preAt+5*60000L)
+            ?"周表预告："+preName+" "+fmt(c,preAt)
             :"周表预告：暂无");
         long last=p.raw().getLong("lastSuccess",0);
         v.setTextViewText(R.id.widget_check,last>0?"上次检测 "+fmt(c,last):"尚未检测");

@@ -312,6 +312,19 @@ function installMock() {
                 assert.equal(await page.locator('body').evaluate(el => el.classList.contains('dark')), true);
                 await page.locator('[data-setting="theme"]').selectOption('light'); await settle();
             });
+            await test('the schedule page exposes the weekly pre-stream reminder and it persists', async () => {
+                await reset('schedule');
+                const copy = await page.locator('#content').innerText();
+                // The page promises a five minute heads-up; the wording must name that window.
+                assert.match(copy, /按周表预告提醒/);
+                assert.match(copy, /开播前 5 分钟/);
+                assert.match(copy, /不响铃/);
+                assert.equal(await page.locator('[data-toggle="preStream"]').getAttribute('aria-checked'), 'true');
+                await page.locator('[data-toggle="preStream"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.state.config.preStream), false);
+                await page.locator('[data-toggle="preStream"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.state.config.preStream), true);
+            });
             await test('app name is Manqu and denied permission requires explicit sound consent', async () => {
                 await reset('home');
                 assert.equal(await page.locator('.brand-name').innerText(), 'VR闹钟');

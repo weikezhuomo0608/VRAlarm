@@ -37,11 +37,14 @@ public final class AlarmScheduler {
      * stop it silently while the process still looks alive. Every completed check pushes this
      * alarm further out, so it only ever fires when the ordinary cycle really did not come back.
      */
-    /** The per-schedule heads-up: one exact alarm at the next scheduled start minus lead. */
-    public static void preStream(Context context,long at){
+    /**
+     * The weekly-schedule heads-up: one exact alarm at the scheduled start minus the lead.
+     * `startAt` is the start itself, so the subtraction happens in exactly one place here.
+     */
+    public static void preStream(Context context,long startAt){
         Prefs p=new Prefs(context);cancel(context,PRESTREAM);
-        if(!p.enabled()||at<=0)return;
-        at(context,PRESTREAM,at);
+        if(!p.enabled()||startAt<=0)return;
+        at(context,PRESTREAM,startAt-PollPlan.PRESTREAM_LEAD_MILLIS);
     }
     public static void keepAlive(Context context){
         Prefs p=new Prefs(context);cancel(context,KEEPALIVE);if(!p.enabled())return;

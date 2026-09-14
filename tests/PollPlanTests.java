@@ -74,6 +74,15 @@ public final class PollPlanTests {
         long sat=PollPlan.nextStart(plan,5,sod,(1200L-60)*60000L,10*60000L);
         check(sat==(1440L*6+1200-10)*60000L,"from Saturday, next Friday is six days out and still found");
         check(PollPlan.nextStart(new java.util.ArrayList<Schedule.Entry>(),4,sod,0,300000L)==0,"an empty plan has no pre-stream time");
+        // The heads-up stores the start and the alarm is armed lead minutes earlier, so the two
+        // conversions must be exact inverses. When they drifted apart the notification announced
+        // a start five minutes later than the schedule actually said.
+        long lead=PollPlan.PRESTREAM_LEAD_MILLIS;
+        check(lead==300000L,"the pre-stream lead is five minutes");
+        long alarmAt=PollPlan.nextStart(plan,4,sod,(1200L-60)*60000L,lead);
+        check(alarmAt==1200L*60000L-lead,"the alarm is armed exactly one lead before the start");
+        check(alarmAt+lead==1200L*60000L,"the stored start is recovered exactly by adding the lead back");
+        check(PollPlan.nextStart(plan,4,sod,alarmAt+lead,lead)==0,"once the start has passed, today yields no further alarm");
 
         System.out.println("PASS: "+count+" poll cycle timing assertions");
     }

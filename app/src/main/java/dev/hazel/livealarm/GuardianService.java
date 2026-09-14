@@ -70,10 +70,11 @@ public class GuardianService extends Service {
         String name=p.raw().getString("preStreamName","");
         long at=p.raw().getLong("preStreamAt",0);
         if(at<=0)return;
-        // preStreamAt is the alarm moment (start-5min); the user cares about the start itself.
+        // preStreamAt already is the scheduled start, so it is formatted as-is. Adding the lead
+        // back here is what used to announce a start five minutes later than the real one.
         String time=java.time.format.DateTimeFormatter.ofPattern("HH:mm")
             .withZone(TimeRules.zone(p.config().optString("timezone")))
-            .format(java.time.Instant.ofEpochMilli(at+5*60000L));
+            .format(java.time.Instant.ofEpochMilli(at));
         Notification n=new Notification.Builder(c,ALARM_CHANNEL).setSmallIcon(R.drawable.ic_bell).setColor(0xff536b81)
             .setContentTitle("快开播了").setContentText((name.isEmpty()?"主播":name)+" 按周表预计 "+time+" 开播")
             .setCategory(Notification.CATEGORY_REMINDER).setAutoCancel(true).build();
@@ -416,11 +417,16 @@ public class GuardianService extends Service {
             String bestName="";long bestAt=0;
             for(Anchors.Anchor a:prefs.anchors()){
                 if(!a.enabled||!a.alarm)continue;
-                long at=PollPlan.nextStart(prefs.schedule(a.id),weekday,sod,now,5*60000L);
+                long at=PollPlan.nextStart(prefs.schedule(a.id),weekday,sod,now,PollPlan.PRESTREAM_LEAD_MILLIS);
                 if(at>0&&(bestAt==0||at<bestAt)){bestAt=at;bestName=a.name;}
             }
-            if(bestAt>0)prefs.raw().edit().putString("preStreamName",bestName).putLong("preStreamAt",bestAt+5*60000L).apply();
-            AlarmScheduler.preStream(this,bestAt);
+            // bestAt is the alarm moment (start minus the lead); the stored value is the start
+            // itself, because that is what both the notice and the widget have to show. With no
+            // upcoming start the caller must pass 0, not 0+lead, or an alarm would be armed for
+            // the epoch and fire at once.
+            long startAt=bestAt>0?bestAt+PollPlan.PRESTREAM_LEAD_MILLIS:0;
+            if(startAt>0)prefs.raw().edit().putString("preStreamName",bestName).putLong("preStreamAt",startAt).apply();
+            AlarmScheduler.preStream(this,startAt);
         }else AlarmScheduler.cancel(this,AlarmScheduler.PRESTREAM);
     }
     private String statusText(JSONObject cfg,int liveCount,String liveNames,boolean boosted){

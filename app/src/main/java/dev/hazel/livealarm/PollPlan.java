@@ -48,6 +48,13 @@ public final class PollPlan {
 
     /** A scheduled start this near lifts the idle gap, and the lift lingers briefly after it. */
     public static final int SOON_BEFORE_MINUTES=30, SOON_AFTER_MINUTES=30;
+    /**
+     * How early the weekly-schedule heads-up is armed. nextStart() subtracts it to produce the
+     * alarm moment, and callers add it back to recover the start they display. Keeping it in one
+     * place is what stops those two conversions from drifting apart — when they did, the heads-up
+     * announced a start five minutes later than the weekly schedule actually said.
+     */
+    public static final long PRESTREAM_LEAD_MILLIS=5*60000L;
     /** weekdayZeroBased: 0=Monday; startOfDayMillis is today's 00:00 in the reminder zone. */
     public static boolean dueSoon(java.util.List<Schedule.Entry> entries,int weekdayZeroBased,long startOfDayMillis,long nowMillis){
         if(entries==null)return false;
