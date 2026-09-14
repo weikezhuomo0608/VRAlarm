@@ -7,7 +7,7 @@ const icon=(name,extra='')=>`<svg class="i ${extra}" viewBox="0 0 24 24" aria-hi
 let seq=0,awaiting=new Map(),native=typeof window.HazelNative!=='undefined',route='home',S=null,configFingerprint='',busy=false,ruleDraft=null,alarmPainted=false,zoneList=[];
 let compatibilityAction=null,compatibilitySaving=false,anchorDraft=null;
 const defaults={soundWithoutNotifications:false,allDay:true,timezone:'device',catchUp:false,pollSeconds:30,reliable:true,boot:true,ringtone:'starlight',customName:'未选择',volume:85,ramp:true,vibrate:true,duration:60,snoozeMinutes:5,quietCalls:true,theme:'light',preStream:true,ringQueue:false,aiOcr:true,aiKey:'',aiModel:'deepseek-flash',seedColor:'',amoled:false,hideRecents:false,recovery:true,backgroundDim:40,cardOpacity:94,windows:[{id:'night',name:'凌晨守候',start:60,end:360,days:127,enabled:true}]};
-const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.1',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
+const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.3',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
 if(!native)$('#preview').textContent='界面预览 · 检测与响铃功能请安装安卓应用体验';
 window.NativeReply=(id,result)=>{const p=awaiting.get(id);if(!p)return;clearTimeout(p.timer);awaiting.delete(id);result.ok?p.resolve(result.value):p.reject(new Error(result.error));};
 function api(action,data={},timeoutMs=10000){
@@ -25,29 +25,46 @@ function hexRgb(hex){return [parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5)
 function lumaRgb(rgb){return (0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2])/255;}
 function mixRgb(a,b,t){return [0,1,2].map(i=>Math.round(a[i]+(b[i]-a[i])*t));}
 function cssRgb(rgb){return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;}
+let systemThemeBound=false;
+// Writing theme variables on <html> alone loses to the body.dark stylesheet rule, because
+// every card resolves its custom properties from the nearest ancestor that sets them. Both
+// elements get the value so the inline declaration wins in either theme.
+function setVar(name,value){
+    [document.documentElement.style,document.body.style].forEach(style=>{
+        if(value===null||value===undefined)style.removeProperty(name);else style.setProperty(name,value);
+    });
+}
+function bindSystemTheme(){
+    if(systemThemeBound||typeof matchMedia!=='function')return;
+    systemThemeBound=true;
+    const query=matchMedia('(prefers-color-scheme:dark)');
+    const handler=()=>{if(S&&S.config&&S.config.theme==='system')applyTheme();};
+    if(query.addEventListener)query.addEventListener('change',handler);
+    else if(query.addListener)query.addListener(handler);
+}
 function applyTheme(){const c=S.config,night=c.theme==='dark'||(c.theme==='system'&&matchMedia('(prefers-color-scheme:dark)').matches);
     document.body.classList.toggle('dark',night);
     document.body.classList.toggle('amoled',night&&!!c.amoled);
-    const vars=document.documentElement.style;
+    bindSystemTheme();
     // Seed colour drives the accent, using the same light/dark derivation as upstream 1.0.6.
     const seed=c.seedColor&&/^#[0-9a-fA-F]{6}$/.test(c.seedColor)?hexRgb(c.seedColor):null;
     if(seed){let primary=seed;
         if(night)primary=mixRgb(seed,[255,255,255],.5);
         else if(lumaRgb(seed)>.45)primary=mixRgb(seed,[0,0,0],.38);
-        vars.setProperty('--primary',cssRgb(primary));
-        vars.setProperty('--on-primary',lumaRgb(primary)>.179?'#111318':'#ffffff');
-    }else{vars.removeProperty('--primary');vars.removeProperty('--on-primary');}
+        setVar('--primary',cssRgb(primary));
+        setVar('--on-primary',lumaRgb(primary)>.179?'#111318':'#ffffff');
+    }else{setVar('--primary',null);setVar('--on-primary',null);}
     const isAlarm=document.body.classList.contains('alarm-page');
     if(isAlarm)return;
     // Card translucency only matters where the background image can show through.
     const base=night?(c.amoled?[18,17,20]:[36,44,53]):[255,255,255];
     const op=Math.min(100,Math.max(75,Number(c.cardOpacity)||94))/100;
-    vars.setProperty('--card',`rgba(${base[0]},${base[1]},${base[2]},${op})`);
+    setVar('--card',`rgba(${base[0]},${base[1]},${base[2]},${op})`);
     const layer=document.getElementById('bg-layer');
     if(layer){
         if(S.backgroundSet){layer.style.backgroundImage='url(/background/current)';document.body.classList.add('has-bg');}
         else{layer.style.backgroundImage='';document.body.classList.remove('has-bg');}
-        vars.setProperty('--bg-dim',String(Math.min(90,Math.max(0,Number(c.backgroundDim)||0))/100));
+        setVar('--bg-dim',String(Math.min(90,Math.max(0,Number(c.backgroundDim)||0))/100));
     }
 }
 function header(){const history=route==='history';$('#header').innerHTML=`<div class="brand"><img src="hazel.png" alt="VR闹钟图标"><div><div class="brand-name">VR闹钟</div><div class="brand-sub">LIVE STREAM ALARM</div></div></div><button class="icon-button" data-action="${history?'back':'history'}" aria-label="${history?'返回':'通知记录'}">${icon(history?'close':'history')}</button>`;}
@@ -140,7 +157,7 @@ function anchorsPage(){
             <div class="anchor-switches"><span class="mini">检测${sw('anchor:'+a.id,a.enabled,a.name+' 的检测开关')}</span><span class="mini">响铃${sw('ring:'+a.id,a.alarm!==false,a.name+' 的响铃开关')}</span></div></div>
             <div class="rule-footer anchor-footer"><small class="muted">${a.snapshot&&a.snapshot.checkedAt?`<span class="nowrap">上次检测 ${stamp(a.snapshot.checkedAt)}</span>`:'<span class="nowrap">尚未检测</span>'}${a.stats&&a.stats.count30!==undefined?` · <span class="nowrap">本周 ${a.stats.count7} 场</span> · <span class="nowrap">近 30 天 ${a.stats.count30} 场</span>`:''}</small><div class="anchor-actions"><button class="text-button" data-anchor-schedule="${esc(a.id)}">周表 ${(a.schedule||[]).length?`<span class="muted">${a.schedule.length}</span>`:''} ${icon('calendar')}</button><button class="text-button" data-anchor-edit="${esc(a.id)}">编辑 ${icon('pencil')}</button><button class="text-button" data-anchor-open="${esc(a.id)}">直播间 ${icon('external')}</button><button class="text-button" data-anchor-profile="${esc(a.id)}">空间 ${icon('external')}</button></div></div></article>`;
     }).join('');
-    html+=`<button class="add-rule" data-action="addAnchor">${icon('plus')}添加主播</button><p class="hint">${icon('info')} 填写 B 站直播间号码（live.bilibili.com/ 后面的数字），应用会读取主播名称与头像。头像只保存在本机；识别不到时也可以自己填名称。「检测」关掉后不再检测这位主播；「响铃」关掉后照常检测、时间线照常亮起，只是不吵你。</p>`;
+    html+=`<button class="add-rule" data-action="addAnchor">${icon('plus')}添加主播</button><p class="hint">${icon('info')} 填写直播间号码，或直接粘贴直播间/主页链接，应用会自己认出是哪个直播间并读取名称与头像。头像只保存在本机；识别不到时也可以自己填名称。「检测」关掉后不再检测这位主播；「响铃」关掉后照常检测、时间线照常亮起，只是不吵你。</p>`;
     $('#content').innerHTML=html;
 }
 function editAnchor(id){
@@ -148,7 +165,7 @@ function editAnchor(id){
     anchorDraft=existing?{id:existing.id,name:existing.name,uid:existing.uid,room:existing.room,enabled:existing.enabled,alarm:existing.alarm!==false,avatar:!!existing.avatar}
                         :{id:'',name:'',uid:0,room:'',enabled:true,alarm:true,avatar:false};
     const d=anchorDraft;
-    openModal(existing?'编辑主播':'添加主播',`<label class="form-label" for="anchor-room">B 站直播间号码</label><input class="input" id="anchor-room" inputmode="numeric" maxlength="12" value="${esc(String(d.room||''))}" placeholder="例如 1713546334"><button class="secondary" data-action="resolveAnchor" style="margin-top:12px">${icon('refresh')}识别主播信息</button><button class="secondary" data-action="refreshAvatar" style="margin-top:10px">${icon('download')}重新下载头像</button><div id="anchor-preview"></div><label class="form-label" for="anchor-name">主播名称</label><input class="input" id="anchor-name" maxlength="40" value="${esc(d.name)}" placeholder="识别后自动填写"><div class="setting-row"><div class="grow"><h3>开播响铃</h3><p class="sub">关闭后仍检测并显示在时间线，但不响铃</p></div>${sw('draftAlarm',d.alarm!==false,'开播响铃开关')}</div><p class="hint">名称会显示在提醒通知里。改动房间号后需要重新识别，避免认错主播。</p><div class="form-error" id="anchor-error"></div>`,`<div class="sheet-actions">${existing?'<button class="secondary outline" data-action="deleteAnchor">删除主播</button>':'<button class="secondary outline" data-action="closeModal">取消</button>'}<button class="primary" data-action="saveAnchorDraft">保存主播</button></div>`);
+    openModal(existing?'编辑主播':'添加主播',`<label class="form-label" for="anchor-room">直播间号码或链接</label><input class="input" id="anchor-room" maxlength="80" value="${esc(String(d.room||''))}" placeholder="号码 1713546334，或粘贴直播间/主页链接"><button class="secondary" data-action="resolveAnchor" style="margin-top:12px">${icon('refresh')}识别主播信息</button><button class="secondary" data-action="refreshAvatar" style="margin-top:10px">${icon('download')}重新下载头像</button><div id="anchor-preview"></div><label class="form-label" for="anchor-name">主播名称</label><input class="input" id="anchor-name" maxlength="40" value="${esc(d.name)}" placeholder="识别后自动填写"><div class="setting-row"><div class="grow"><h3>开播响铃</h3><p class="sub">关闭后仍检测并显示在时间线，但不响铃</p></div>${sw('draftAlarm',d.alarm!==false,'开播响铃开关')}</div><p class="hint">可以直接粘贴主播的直播间链接（live.bilibili.com/…）、主页链接（space.bilibili.com/…）或只填号码，应用会自己认出是哪个直播间。名称会显示在提醒通知里；改动号码后需要重新识别，避免认错主播。</p><div class="form-error" id="anchor-error"></div>`,`<div class="sheet-actions">${existing?'<button class="secondary outline" data-action="deleteAnchor">删除主播</button>':'<button class="secondary outline" data-action="closeModal">取消</button>'}<button class="primary" data-action="saveAnchorDraft">保存主播</button></div>`);
     paintAnchorPreview();
 }
 function paintAnchorPreview(){
@@ -156,15 +173,29 @@ function paintAnchorPreview(){
     const d=anchorDraft;
     box.innerHTML=d.room?`<div class="anchor-preview">${anchorArt(d)}<div class="grow"><strong>${esc(d.name||'尚未识别')}</strong><small class="sub">${d.uid?`<span class="nowrap">UID ${esc(String(d.uid))}</span> · <span class="nowrap">直播间 ${esc(String(d.room))}</span>`:'请先点“识别主播信息”'}</small></div></div>`:'';
 }
+/** Accepts a room number, a live link, a space link, or "UID 12345"; bare digits are rooms. */
+function parseAnchorInput(raw){
+    const text=String(raw||'').trim();
+    if(!text)return null;
+    let m=text.match(/live\.bilibili\.com\/(?:blanc\/)?(\d{2,12})/i);
+    if(m)return {room:Number(m[1])};
+    m=text.match(/space\.bilibili\.com\/(\d{2,15})/i);
+    if(m)return {uid:Number(m[1])};
+    m=text.match(/^(?:uid|UID)\s*[:：]?\s*(\d{2,15})$/);
+    if(m)return {uid:Number(m[1])};
+    if(/^\d{2,15}$/.test(text))return {room:Number(text)};
+    return null;
+}
 async function resolveAnchorDraft(){
     const error=$('#anchor-error');if(error)error.textContent='';
     const button=$('#modal [data-action="resolveAnchor"]');
-    const room=Number(($('#anchor-room').value||'').trim());
-    if(!Number.isFinite(room)||room<=0){if(error)error.textContent='请填写直播间号码，例如 1713546334';return;}
+    const parsed=parseAnchorInput($('#anchor-room').value);
+    if(!parsed){if(error)error.textContent='请填写直播间号码、直播间链接（live.bilibili.com/…）或主播主页链接';return;}
+    const room=parsed.room||0;
     // Two lookups plus the avatar download: give it longer than the default bridge timeout.
     if(button){button.disabled=true;button.textContent='正在识别…';}
     try{
-        const found=await api('resolveAnchor',{room,id:anchorDraft.id},40000);
+        const found=await api('resolveAnchor',{room,uid:parsed.uid||0,id:anchorDraft.id},60000);
         anchorDraft={...anchorDraft,...found};
         $('#anchor-name').value=found.name||'';$('#anchor-room').value=String(found.room);
         paintAnchorPreview();
@@ -189,8 +220,10 @@ async function refreshAvatarDraft(){
 async function saveAnchorDraft(){
     const error=$('#anchor-error');if(error)error.textContent='';
     try{
-        const room=Number(($('#anchor-room').value||'').trim()),name=($('#anchor-name').value||'').trim();
-        if(!Number.isFinite(room)||room<=0)throw new Error('请填写直播间号码');
+        const parsed=parseAnchorInput($('#anchor-room').value),name=($('#anchor-name').value||'').trim();
+        if(!parsed)throw new Error('请填写直播间号码或粘贴直播间/主页链接');
+        const room=anchorDraft.uid&&!parsed.room?Number(anchorDraft.room):(parsed.room||Number(anchorDraft.room));
+        if(!Number.isFinite(room)||room<=0)throw new Error('请先点“识别主播信息”，确认是这个直播间');
         if(!name)throw new Error('请填写主播名称');
         // A changed room invalidates the resolved identity, so the uid cannot be reused.
         if(!anchorDraft.uid||Number(anchorDraft.room)!==room)throw new Error('请先点“识别主播信息”，确认是这个直播间');

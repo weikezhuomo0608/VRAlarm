@@ -50,6 +50,21 @@ public final class BiliApi {
      * Turn a typed room number into a stored anchor. The room is canonicalised first, so a
      * short id still passes the identity check in parse(). Name and picture are best effort.
      */
+    /** The live room of one user id, so a pasted space link can be added like a room link. */
+    public static long roomOfUid(long uid)throws IOException{
+        try{
+            JSONObject d=request("https://api.live.bilibili.com/live_user/v1/Master/info?uid="+uid,"https://space.bilibili.com/"+uid);
+            JSONObject info=d.optJSONObject("info");
+            long room=info==null?0:info.optLong("room_id",0);
+            if(room<=0)throw new ApiException("这个账号还没有开通直播间，请改用直播间号码或直播间链接",false);
+            return room;
+        }catch(ApiException e){
+            if(e.rateLimited)throw e;
+            String message=e.getMessage();
+            if(message!=null&&(message.startsWith("B 站接口")||message.startsWith("B 站暂时")))throw new ApiException("没有找到这个账号的直播间，请改用直播间号码或直播间链接",false);
+            throw e;
+        }
+    }
     public static Profile resolve(long room)throws IOException{
         String referer="https://live.bilibili.com/"+room;
         Profile p=new Profile();

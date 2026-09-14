@@ -638,6 +638,39 @@ function installMock() {
                 await page.locator('[data-action="removeScheduleImage"]').click(); await settle();
                 assert.equal(await page.evaluate(() => __mock.lastRemoveImage), 'hazel');
             });
+            await test('accent colour and card opacity win over the dark theme defaults', async () => {
+                await reset('settings');
+                await page.selectOption('[data-setting="theme"]', 'dark');
+                await page.waitForFunction(() => document.body.classList.contains('dark'));
+                await page.locator('[data-seed="#A65C83"]').click(); await settle();
+                await page.evaluate(async () => { __mock.state.config.cardOpacity = 80; await window.refreshNative(true); });
+                const computed = await page.evaluate(() => {
+                    const cs = getComputedStyle(document.querySelector('.card'));
+                    return { primary: cs.getPropertyValue('--primary').replace(/\s+/g, ''), card: cs.getPropertyValue('--card').replace(/\s+/g, '') };
+                });
+                // rgb(171,194,214) is the stylesheet's dark default; the picked seed must beat it.
+                assert.notEqual(computed.primary, 'rgb(171,194,214)');
+                assert.match(computed.card, /rgba\(36,44,53,0\.8\)/);
+                await page.selectOption('[data-setting="theme"]', 'light'); await settle();
+            });
+            await test('pasting a live or space link resolves the anchor', async () => {
+                await reset('anchors');
+                await page.locator('[data-action="addAnchor"]').click();
+                await page.fill('#anchor-room', 'https://live.bilibili.com/1713546334?from=search');
+                await page.locator('[data-action="resolveAnchor"]').click(); await settle();
+                let sent = await page.evaluate(() => __mock.lastResolve);
+                assert.equal(sent.room, 1713546334);
+                assert.equal(sent.uid, 0);
+                await page.fill('#anchor-room', 'https://space.bilibili.com/1298779265');
+                await page.locator('[data-action="resolveAnchor"]').click(); await settle();
+                sent = await page.evaluate(() => __mock.lastResolve);
+                assert.equal(sent.room, 0);
+                assert.equal(sent.uid, 1298779265);
+                await page.fill('#anchor-room', 'UID 1234567');
+                await page.locator('[data-action="resolveAnchor"]').click(); await settle();
+                sent = await page.evaluate(() => __mock.lastResolve);
+                assert.equal(sent.uid, 1234567);
+            });
             await test('the background picture renders and can be removed', async () => {
                 await reset('settings');
                 await page.evaluate(async () => { __mock.state.backgroundSet = true; __mock.state.backgroundName = '夜色.png'; await window.refreshNative(true); });

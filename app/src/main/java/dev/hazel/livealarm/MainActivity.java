@@ -178,7 +178,7 @@ public class MainActivity extends Activity {
     private String versionName(){
         try{String name=getPackageManager().getPackageInfo(getPackageName(),0).versionName;if(name!=null&&!name.isEmpty())return name;}
         catch(Exception ignored){}
-        return "1.1.1";
+        return "1.1.3";
     }
     private JSONObject permissions(){
         JSONObject p=new JSONObject();NotificationManager n=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
@@ -265,7 +265,10 @@ public class MainActivity extends Activity {
             }
             case "resolveAnchor":{
                 long room=data.getLong("room");
-                if(room<=0)throw new Exception("请填写房间号");
+                final long uid=data.optLong("uid",0);
+                // Either a room (number/live link) or a uid (space link) is enough; a uid is
+                // mapped to its live room first, so both entry forms end in the same place.
+                if(room<=0&&uid<=0)throw new Exception("请填写直播间号码、直播间链接或主播主页链接");
                 String id=data.optString("id","");
                 final String anchorId=Anchors.validId(id)?id:UUID.randomUUID().toString();
                 // Two lookups plus the avatar have to run off the UI thread, so this action
@@ -274,7 +277,7 @@ public class MainActivity extends Activity {
                 io.execute(()->{
                     Object value;boolean ok=true;
                     try{
-                        BiliApi.Profile found=BiliApi.resolve(requested);
+                        BiliApi.Profile found=BiliApi.resolve(requested>0?requested:BiliApi.roomOfUid(uid));
                         JSONObject out=new JSONObject();Prefs.put(out,"id",anchorId);Prefs.put(out,"room",found.room);Prefs.put(out,"uid",found.uid);Prefs.put(out,"name",found.name);
                         Prefs.put(out,"avatar",downloadAvatar(anchorId,found.face));value=out;
                     }catch(Exception e){ok=false;value=errorText(e);}
