@@ -110,7 +110,7 @@ function home(){
     if(S.networkError||S.serviceError||S.startError)html+=`<div class="card warning"><p>${esc(S.serviceError||S.startError||S.networkError)}</p></div>`;
     html+=`<div class="quick-actions"><button class="quick" data-action="testDialog">${icon('sound')}<div><strong>响铃测试</strong><small>听一下，放心等</small></div></button><button class="quick" data-action="openLive" data-anchor="${esc(liveTarget.id||'')}">${icon('external')}<div><strong>打开直播间</strong><small>${liveNow.length?'正在直播中':'去守候的直播间看看'}</small></div></button></div>
     <section class="card ready"><div class="row"><div class="label-icon green">${icon('shield')}</div><div class="grow"><h3>响铃准备度 <span class="muted">${ready} / 5</span></h3><p class="sub">${ready===5?'主要权限已就绪，仍建议做一次锁屏测试':'检查通知与后台权限，让提醒更可靠'}</p></div><button class="text-button" data-route="settings">去检查 ${icon('arrow')}</button></div></section>
-    <p class="footnote">每场直播只自动提醒一次。<br>关机、断网或被系统强制停止时，提醒可能延迟或无法送达。</p>`;
+    <p class="footnote">每场直播只自动提醒一次。<br>关机、断网或被系统强制停止时，提醒可能延迟或无法送达。<br>本质AI拼好钟，切勿盲目信任。</p>`;
     $('#content').innerHTML=html;
 }
 function anchorStatus(snapshot){
