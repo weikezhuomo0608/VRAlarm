@@ -13,7 +13,8 @@ def main():
     output = root / 'build' / 'core-tests'
     output.mkdir(parents=True, exist_ok=True)
     classes = ['TimeRules', 'LiveGate', 'AlertPolicy', 'WatchStatus', 'Anchors', 'PollPlan', 'Schedule']
-    tests = ['CoreTests', 'AlertPolicyTests', 'WatchStatusTests', 'AnchorsTests', 'PollPlanTests', 'ScheduleTests']
+    tests = ['CoreTests', 'AlertPolicyTests', 'WatchStatusTests', 'AnchorsTests', 'PollPlanTests',
+             'ScheduleTests', 'LiveGateTests']
     sources = [root / 'app/src/main/java/dev/hazel/livealarm' / (name + '.java')
                for name in classes]
     sources += [root / 'tests' / (name + '.java') for name in tests]

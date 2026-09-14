@@ -51,3 +51,4 @@ body.dark.amoled{--bg:#000;--soft:#161316;--line:#221f23}
 .sched-empty{padding:22px 18px}
 @media(max-width:360px){.sched-side{max-width:112px}.sched-time{font-size:14px}.sched-head .anchor-art{width:40px;height:40px}}
 .alarm-halo img.cover{width:150px;height:90px;border-radius:22px;object-fit:cover;border:1px solid rgba(255,255,255,.35)}
+

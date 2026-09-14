@@ -25,7 +25,7 @@ public class GuardianService extends Service {
     private MediaPlayer player;private Vibrator vibrator;private AudioFocusRequest focus;
     private ConnectivityManager connectivity;private ConnectivityManager.NetworkCallback networkCallback;
     private BroadcastReceiver notificationChanges;
-    private String watchDetail="正在准备守候",lastNoticeKey="",lastFailedIds="",lastInternalError="";
+    private String watchDetail="正在准备守候",lastNoticeKey="",lastFailedIds="",lastInternalError="",lastAnchorError="";
     /** The planned wake-up time already reported as missed, so one outage logs one entry. */
     private long lastInterruptionLogged=0;
     /** Which anchor the current or most recent alarm belongs to. */
@@ -284,8 +284,13 @@ public class GuardianService extends Service {
     }
     private void check(boolean snooze){
         if(destroyed||!prefs.enabled()){if(!ringing)stopSelf();return;}
+        if(snooze)snoozeCheck=true;
+        // Deliberately after the in-flight guard: nextCheck is only rewritten when a cycle
+        // finishes, so while one is running the stored plan is stale by design. Judging it here
+        // made a long cycle (each anchor may spend two 17 s timeouts plus a retry) report itself
+        // as an interruption.
+        if(busy)return;
         noteInterruption();
-        if(snooze)snoozeCheck=true;if(busy)return;
         handler.removeCallbacks(poll);syncPower();
         if(!hasNetwork()){failed("网络未连接，联网后会自动重试",false);return;}
         ArrayList<Anchors.Anchor> targets=new ArrayList<>();
@@ -326,18 +331,39 @@ public class GuardianService extends Service {
      * that the watch really was not running in between. Reporting it is the only way the user can
      * tell "the alarm never came" from "the app was never allowed to run", which are the same
      * symptom and completely different fixes.
+     *
+     * The classification lives in PollPlan.classifyLate, which is pure Java and unit tested: a
+     * lateness figure alone cannot tell a killed service from a dozing phone, and the old code
+     * treated every five-minute delay as an interruption. On a dozing phone the system will not
+     * wake any app more often than about once every nine minutes, so that warning fired on every
+     * cycle of every night.
      */
-    private static final long INTERRUPTION_SLACK_MS=300000L;
     private void noteInterruption(){
         long planned=prefs.raw().getLong("nextCheck",0);
         if(planned<=0||planned==lastInterruptionLogged)return;
-        long late=System.currentTimeMillis()-planned;
-        if(late<INTERRUPTION_SLACK_MS)return;
-        // Outside the reminder window a sleeping device is expected and costs nothing.
-        if(!prefs.allowed(System.currentTimeMillis()))return;
+        long now=System.currentTimeMillis();
+        long late=now-planned;
+        boolean restarted=prefs.raw().getLong("serviceStartedAt",0)>planned;
+        PollPlan.Late kind=PollPlan.classifyLate(late,prefs.raw().getBoolean("nextCheckAllowed",false),
+            prefs.allowed(now),restarted,deviceAwake());
+        if(kind==PollPlan.Late.NONE)return;
         lastInterruptionLogged=planned;
-        prefs.log("warning","守候曾被中断","上次检测比计划晚约 "+Math.max(1,Math.round(late/60000.0))
-            +" 分钟，该时段内不会检测开播。现在已恢复；若经常出现，请允许自启动、把电池设为不限制，并在最近任务中锁定本应用");
+        long minutes=Math.max(1,Math.round(late/60000.0));
+        if(kind==PollPlan.Late.RESTARTED){
+            prefs.log("warning","守候曾被中断","中断约 "+minutes+" 分钟，该时段内没有检测开播；服务已被系统清理并自动恢复。"
+                +"若经常出现，请允许自启动、把电池设为不限制，并在最近任务中锁定本应用");
+        }else{
+            // The service never stopped; only the wake-up was late. Recording this as an ordinary
+            // entry keeps "interrupted" meaning what it says.
+            prefs.log("system","本次检测被推迟","比计划晚约 "+minutes
+                +" 分钟；通常是系统休眠或省电策略延后了唤醒，守候服务本身仍在运行");
+        }
+    }
+    /** Both halves matter: a dozing device explains any lateness, so lateness only means
+     *  something while the phone is actually in use. */
+    private boolean deviceAwake(){
+        PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
+        return power!=null&&power.isInteractive()&&!power.isDeviceIdleMode();
     }
     private void apply(List<Observation> seen,int cycleMillis){
         JSONObject cfg=prefs.config();
@@ -359,28 +385,43 @@ public class GuardianService extends Service {
                 continue;
             }
             okCount++;
-            // Keeping the last title avoids blanking the card on a partial response.
-            if(o.snapshot.title.isEmpty())o.snapshot.title=prefs.snapshot(o.anchor.id).optString("title",o.anchor.name+"的直播间");
-            prefs.saveSnapshot(o.anchor.id,o.snapshot.json());
-            LiveGate.State state=prefs.gate(o.anchor.id);
-            // Arm time is per anchor: one added while the watch was already running has its own
-            // moment of joining, so a stream that began earlier is not reported as a new start.
-            LiveGate.Decision d=LiveGate.observe(state,o.snapshot.status==1,o.snapshot.start,o.snapshot.checkedAt,prefs.armedAt(o.anchor.id),catchUp,t->TimeRules.contains(t,allDay,windows,zone));
-            boolean explicitlySnoozed=false;
-            if(snoozeTarget!=null&&snoozeTarget.equals(o.anchor.id)){
-                explicitlySnoozed=o.snapshot.status==1&&TimeRules.contains(o.snapshot.checkedAt,allDay,windows,zone)&&state.session.equals(prefs.snoozeSessionId());
-                clearSnooze();
-                if(!explicitlySnoozed)prefs.log("skip","暂缓提醒已取消","本场已结束、场次变化或当前处于提醒时段之外");
+            // One anchor's unreadable state must not silence every other anchor. Without this,
+            // a single bad gate or snapshot throws out of the loop, the caller's handler logs an
+            // internal error and no anchor is ever evaluated again on that cycle — which presents
+            // to the user as "a stream went live and nothing rang".
+            try{
+                // Keeping the last title avoids blanking the card on a partial response.
+                if(o.snapshot.title.isEmpty())o.snapshot.title=prefs.snapshot(o.anchor.id).optString("title",o.anchor.name+"的直播间");
+                prefs.saveSnapshot(o.anchor.id,o.snapshot.json());
+                LiveGate.State state=prefs.gate(o.anchor.id);
+                // Arm time is per anchor: one added while the watch was already running has its own
+                // moment of joining, so a stream that began earlier is not reported as a new start.
+                LiveGate.Decision d=LiveGate.observe(state,o.snapshot.status==1,o.snapshot.start,o.snapshot.checkedAt,prefs.armedAt(o.anchor.id),catchUp,t->TimeRules.contains(t,allDay,windows,zone));
+                boolean explicitlySnoozed=false;
+                if(snoozeTarget!=null&&snoozeTarget.equals(o.anchor.id)){
+                    explicitlySnoozed=o.snapshot.status==1&&TimeRules.contains(o.snapshot.checkedAt,allDay,windows,zone)&&state.session.equals(prefs.snoozeSessionId());
+                    clearSnooze();
+                    if(!explicitlySnoozed)prefs.log("skip","暂缓提醒已取消","本场已结束、场次变化或当前处于提醒时段之外");
+                }
+                if(d.reason.equals("live_start")||d.reason.equals("catch_up"))
+                    prefs.statSession(o.anchor.id,state.started>0?state.started:o.snapshot.checkedAt);
+                if(o.snapshot.status!=1&&state.offlineSamples>=2)prefs.closeStatSession(o.anchor.id);
+                if(d.ring||explicitlySnoozed)ring(o.anchor,o.snapshot,state,explicitlySnoozed);
+                else noteSkip(o.anchor,o.snapshot,state,d);
+                prefs.saveGate(o.anchor.id,state);
+                if(ringing&&!testing&&o.anchor.id.equals(ringingAnchorId)&&state.offlineSamples>=2){finishAlarm("ended",false);prefs.log("system","直播已结束","已停止本次响铃");}
+                if(o.snapshot.status!=1&&state.offlineSamples>=2&&o.anchor.id.equals(prefs.snoozeAnchorId()))clearSnooze();
+                if(o.snapshot.status==1){liveCount++;liveNames=liveNames.isEmpty()?o.anchor.name:liveNames+"、"+o.anchor.name;}
+            }catch(Exception e){
+                // Counted out again: this anchor was not actually read, so it must not be the
+                // reason the network-error banner is cleared.
+                okCount--;
+                String kind=e.getClass().getSimpleName();
+                if(!kind.equals(lastAnchorError)){
+                    lastAnchorError=kind;
+                    prefs.log("warning","有一位主播本次未能处理","应用内部错误（"+kind+"）；已跳过这一位，其余主播照常检查与响铃");
+                }
             }
-            if(d.reason.equals("live_start")||d.reason.equals("catch_up"))
-                prefs.statSession(o.anchor.id,state.started>0?state.started:o.snapshot.checkedAt);
-            if(o.snapshot.status!=1&&state.offlineSamples>=2)prefs.closeStatSession(o.anchor.id);
-            if(d.ring||explicitlySnoozed)ring(o.anchor,o.snapshot,state,explicitlySnoozed);
-            else noteSkip(o.anchor,o.snapshot,state,d);
-            prefs.saveGate(o.anchor.id,state);
-            if(ringing&&!testing&&o.anchor.id.equals(ringingAnchorId)&&state.offlineSamples>=2){finishAlarm("ended",false);prefs.log("system","直播已结束","已停止本次响铃");}
-            if(o.snapshot.status!=1&&state.offlineSamples>=2&&o.anchor.id.equals(prefs.snoozeAnchorId()))clearSnooze();
-            if(o.snapshot.status==1){liveCount++;liveNames=liveNames.isEmpty()?o.anchor.name:liveNames+"、"+o.anchor.name;}
         }
         if(okCount>0){
             if(failures>0)prefs.log("system","连接已恢复","已重新获取直播状态");
@@ -495,8 +536,12 @@ public class GuardianService extends Service {
     private void scheduleNext(int seconds){
         handler.removeCallbacks(poll);AlarmScheduler.cancel(this,AlarmScheduler.KEEPALIVE);
         if(!prefs.enabled())return;
+        long now=System.currentTimeMillis();
         long delay=seconds*1000L+(long)(Math.random()*900);
-        prefs.raw().edit().putLong("nextCheck",System.currentTimeMillis()+delay).apply();
+        // Whether this plan was made inside the reminder window is what the interruption check
+        // needs later: an idle plan is allowed to be hours late, because outside the window the
+        // phone is expected to sleep, and the gap is deliberate.
+        prefs.raw().edit().putLong("nextCheck",now+delay).putBoolean("nextCheckAllowed",prefs.allowed(now)).apply();
         // Safety net for this loop: three times the delay it just chose for itself, so a cycle
         // that does come back always replaces it and it only fires when the loop has stalled.
         AlarmScheduler.at(this,AlarmScheduler.KEEPALIVE,System.currentTimeMillis()+Math.max(90000L,delay*3));

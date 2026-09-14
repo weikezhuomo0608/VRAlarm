@@ -96,4 +96,39 @@ public final class PollPlan {
         long seconds=(long)gap*3;
         return (int)(seconds<MIN_KEEPALIVE_SECONDS?MIN_KEEPALIVE_SECONDS:seconds);
     }
+
+    /**
+     * While the device is dozing, the platform will not hand any app its allow-while-idle alarms
+     * more often than about once every nine minutes — and once every fifteen when exact alarms
+     * are not granted, which is the default for an app targeting a recent API level. A report
+     * floor below that floor would describe a perfectly healthy watch as interrupted on every
+     * single cycle of a dozing night, which is exactly when the reminder window is open.
+     */
+    public static final long ALLOW_WHILE_IDLE_FLOOR_MS=9*60000L;
+    public static final long INTERRUPTION_FLOOR_MS=ALLOW_WHILE_IDLE_FLOOR_MS+60000L;
+
+    /** What a late cycle actually proves. See classifyLate. */
+    public enum Late { NONE, RESTARTED, DELAYED }
+
+    /**
+     * A cycle that started late is not by itself evidence that the watch stopped: the same
+     * doze that delays the wake-up also delays every other explanation. Only these readings
+     * are worth telling the user about:
+     *
+     *   RESTARTED — the service was created after the moment it had planned to run, so the
+     *               process really was gone in between. This is the one honest "interrupted".
+     *   DELAYED   — the service has been alive the whole time but the cycle is late while the
+     *               phone is awake and in use, so something other than sleep held it up.
+     *
+     * A plan made outside the reminder window is silently dropped: the idle interval there is
+     * deliberate, the phone is expected to sleep, and the boundary crossing would otherwise
+     * turn a normal three-minute idle gap into a huge, meaningless lateness.
+     */
+    public static Late classifyLate(long lateMillis, boolean planWasInsideWindow, boolean insideWindowNow,
+                                    boolean serviceRestartedAfterPlan, boolean deviceAwake) {
+        if (!planWasInsideWindow || !insideWindowNow) return Late.NONE;
+        if (lateMillis < INTERRUPTION_FLOOR_MS) return Late.NONE;
+        if (serviceRestartedAfterPlan) return Late.RESTARTED;
+        return deviceAwake ? Late.DELAYED : Late.NONE;
+    }
 }

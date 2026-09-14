@@ -34,6 +34,11 @@ secrets/
 *.jar
 *.log
 *.zip
+# Desktop binaries never belong in this repository: they are large, and this is an
+# Android project. Distribute them through GitHub Releases instead.
+*.exe
+*.msi
+*.dll
 *backup*.json
 *notification-diagnostics*.json
 *system-policy*.txt

@@ -84,6 +84,21 @@ public final class PollPlanTests {
         check(alarmAt+lead==1200L*60000L,"the stored start is recovered exactly by adding the lead back");
         check(PollPlan.nextStart(plan,4,sod,alarmAt+lead,lead)==0,"once the start has passed, today yields no further alarm");
 
+        // 迟到判定：一次迟到本身并不能说明守候停了。休眠会同时推迟唤醒与心跳，
+        // 所以只有当进程真的被重建过、或者手机醒着却仍然迟到时，才值得告诉用户。
+        long floor=PollPlan.INTERRUPTION_FLOOR_MS;
+        check(floor>PollPlan.ALLOW_WHILE_IDLE_FLOOR_MS,"the report floor clears the platform's doze wake-up floor");
+        check(PollPlan.ALLOW_WHILE_IDLE_FLOOR_MS>=9*60000L,"doze will not wake an app more often than about every nine minutes");
+        check(PollPlan.classifyLate(floor-1,true,true,true,true)==PollPlan.Late.NONE,"just under the floor is never reported");
+        check(PollPlan.classifyLate(floor+1,true,true,true,true)==PollPlan.Late.RESTARTED,"a service created after its own plan was killed");
+        check(PollPlan.classifyLate(floor+1,true,true,false,true)==PollPlan.Late.DELAYED,"an alive service late while the phone is awake");
+        check(PollPlan.classifyLate(floor+1,true,true,false,false)==PollPlan.Late.NONE,"a dozing phone explains any lateness");
+        check(PollPlan.classifyLate(3*3600000L,false,true,false,true)==PollPlan.Late.NONE,"an idle plan outside the window is allowed to be hours late");
+        check(PollPlan.classifyLate(3*3600000L,true,false,false,true)==PollPlan.Late.NONE,"nothing was expected to be watched outside the window");
+        check(PollPlan.classifyLate(3*3600000L,false,false,true,false)==PollPlan.Late.NONE,"idle plan plus doze plus the wrong side of the boundary stays silent");
+        check(PollPlan.classifyLate(0,true,true,true,true)==PollPlan.Late.NONE,"a cycle on time is not late at all");
+        check(PollPlan.classifyLate(3*3600000L,true,true,true,false)==PollPlan.Late.RESTARTED,"a real restart is reported even if the phone is asleep now");
+
         System.out.println("PASS: "+count+" poll cycle timing assertions");
     }
 }

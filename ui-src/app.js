@@ -6,8 +6,12 @@ const paths={bell:'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',moon
 const icon=(name,extra='')=>`<svg class="i ${extra}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.bell}"></path></svg>`;
 let seq=0,awaiting=new Map(),native=typeof window.HazelNative!=='undefined',route='home',S=null,configFingerprint='',busy=false,ruleDraft=null,alarmPainted=false,zoneList=[];
 let compatibilityAction=null,compatibilitySaving=false,anchorDraft=null;
+/* Doze will not wake any app more often than about once every nine minutes, so a heartbeat is
+   legitimately older than that on a sleeping phone. Only past this does a stale beat mean
+   something even while the service is still alive. Mirrors PollPlan.INTERRUPTION_FLOOR_MS. */
+const WATCH_STALL_MS=10*60000;
 const defaults={soundWithoutNotifications:false,allDay:true,timezone:'device',catchUp:false,pollSeconds:30,reliable:true,boot:true,ringtone:'starlight',customName:'未选择',volume:85,ramp:true,vibrate:true,duration:60,snoozeMinutes:5,quietCalls:true,theme:'light',preStream:true,ringQueue:false,aiOcr:true,aiKey:'',aiModel:'deepseek-flash',seedColor:'',amoled:false,hideRecents:false,recovery:true,backgroundDim:40,cardOpacity:94,windows:[{id:'night',name:'凌晨守候',start:60,end:360,days:127,enabled:true}]};
-const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.5',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
+const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.6',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
 if(!native)$('#preview').textContent='界面预览 · 检测与响铃功能请安装安卓应用体验';
 window.NativeReply=(id,result)=>{const p=awaiting.get(id);if(!p)return;clearTimeout(p.timer);awaiting.delete(id);result.ok?p.resolve(result.value):p.reject(new Error(result.error));};
 function api(action,data={},timeoutMs=10000){
@@ -130,9 +134,14 @@ function home(){
     <div class="live-info"><span class="dot ${isLive?'live':''}"></span><span class="live-state">${liveLabel}</span><button class="text-button" data-action="refresh">${icon('refresh')}刷新</button></div>${liveNow.length===1&&liveNow[0].snapshot.title?`<p class="live-title">${esc(liveNow[0].snapshot.title)}</p>`:''}<p class="timestamp" style="margin-top:7px">${lastCheck?'上次成功检测 '+stamp(lastCheck)+' · '+esc(S.zone):'尚未连接直播间，点击刷新查看状态'}</p></section>`;
     if(!armed.length)html+=`<div class="card warning"><p>当前没有启用中的主播，守候不会响铃。</p><button class="text-button" data-route="anchors">去主播页启用 ${icon('arrow')}</button></div>`;
     if(S.ringing)html=`<div class="card warning"><div class="row"><div class="grow"><h3>响铃进行中</h3><p class="sub">${S.alarmAnchor?esc(S.alarmAnchor)+' · ':''}点按右侧按钮立即结束</p></div><button class="primary" data-action="dismiss">关闭响铃</button></div></div>`+html;
-    // The heartbeat is the only honest signal that the watch is actually running.
-    const beat=S.serviceHeartbeatAt||0,silent=Date.now()-beat;
-    if(S.enabled&&(!beat||silent>180000))html+=`<div class="card warning"><p>守候服务已中断${beat?'约 '+Math.round(silent/60000)+' 分钟':'，尚未收到服务心跳'}，期间不会检测开播。应用每 15 分钟会尝试自动恢复；若经常中断，请在系统设置中允许“自启动”，把电池策略设为“不限制”，并在最近任务里长按本应用的卡片将它<strong>锁定</strong>——从最近任务划掉应用时，系统会连恢复用的闹钟一起停掉。</p><button class="text-button" data-action="start">立即重新开启 ${icon('arrow')}</button>${p.accessibility?'':`<button class="text-button" data-action="accessibilityInfo">开启无障碍守候辅助 ${icon('arrow')}</button>`}</div>`;
+    // Liveness, not heartbeat age, decides whether the watch is really gone. The state poll runs
+    // in the same process as the service, so S.running cannot be stale; a heartbeat is delayed by
+    // exactly the doze that delays the checks, so a stale one proves nothing on its own — under
+    // doze no app is woken more often than about once every nine minutes, and warning at three
+    // made the phone's own sleep look like a failure.
+    const beat=S.serviceHeartbeatAt||0,silent=Date.now()-beat,stalled=beat>0&&silent>WATCH_STALL_MS;
+    if(S.enabled&&!S.running)html+=`<div class="card warning"><p>守候服务已中断${beat?'，上次心跳在约 '+Math.round(silent/60000)+' 分钟前':'，尚未收到服务心跳'}，期间不会检测开播。应用每 15 分钟会尝试自动恢复；若经常中断，请在系统设置中允许“自启动”，把电池策略设为“不限制”，并在最近任务里长按本应用的卡片将它<strong>锁定</strong>——从最近任务划掉应用时，系统会连恢复用的闹钟一起停掉。</p><button class="text-button" data-action="start">立即重新开启 ${icon('arrow')}</button>${p.accessibility?'':`<button class="text-button" data-action="accessibilityInfo">开启无障碍守候辅助 ${icon('arrow')}</button>`}</div>`;
+    else if(S.enabled&&stalled)html+=`<div class="card"><p class="sub">守候服务仍在运行，只是最近一次心跳在约 ${Math.round(silent/60000)} 分钟前——手机休眠或省电策略会同时推迟心跳与检测，恢复亮屏后会自动接上。</p></div>`;
     if(S.enabled)html+=watchNoticeCard();
     if(!p.notifications)html+=`<div class="card warning"><p>${c.soundWithoutNotifications?'通知异常兼容响铃已开启；系统通知仍未获准，响铃时可打开应用关闭。':'系统尚未允许通知。可在设置中授权，或选择通知异常时仍响铃。'}</p><button class="text-button" data-action="compatibilityInfo">${c.soundWithoutNotifications?'查看兼容响铃说明':'选择兼容响铃'} ${icon('arrow')}</button></div>`;
     if(S.testAt>Date.now())html+=`<div class="card warning"><div class="row"><div class="grow"><h3>锁屏测试已安排</h3><p class="sub">${stamp(S.testAt)} 响铃，现在可以锁屏</p></div><button class="text-button" data-action="cancelTest">取消</button></div></div>`;

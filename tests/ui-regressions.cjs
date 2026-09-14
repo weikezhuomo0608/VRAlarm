@@ -485,10 +485,15 @@ function installMock() {
                 assert.equal(await page.locator('[data-notification-help]').count(),1);
                 await page.locator('#modal [data-action="closeModal"]').click();
             });
-            await test('a stale service heartbeat is reported instead of looking healthy', async () => {
+            await test('a stopped watch is reported, while a sleeping phone only defers it', async () => {
                 await reset();
-                await page.evaluate(async () => { __mock.state.enabled = true; __mock.state.serviceHeartbeatAt = Date.now() - 30 * 60000; await window.refreshNative(true); });
-                assert.match(await page.locator('#content').innerText(), /守候服务已中断约 30 分钟/);
+                // Enabled but the service is gone: this is the one case that deserves the alarm.
+                await page.evaluate(async () => {
+                    __mock.state.enabled = true; __mock.state.running = false;
+                    __mock.state.serviceHeartbeatAt = Date.now() - 30 * 60000;
+                    await window.refreshNative(true);
+                });
+                assert.match(await page.locator('#content').innerText(), /守候服务已中断/);
                 assert.match(await page.locator('#content').innerText(), /自启动/);
                 // Swiping the app away rejects alarms too, so the guidance has to name the recents lock.
                 assert.match(await page.locator('#content').innerText(), /最近任务/);
@@ -497,9 +502,35 @@ function installMock() {
                 await page.locator('[data-action="accessibilityInfo"]').click();
                 assert.match(await page.locator('#modal').innerText(), /由系统自己重新绑定/);
                 await page.locator('#modal [data-action="closeModal"]').last().click();
-                await page.evaluate(async () => { __mock.state.permissions.accessibility = true; __mock.state.serviceHeartbeatAt = Date.now(); await window.refreshNative(true); });
+
+                // The service is alive but its heartbeat is old: doze delays the heartbeat and the
+                // checks alike, so this must not be announced as an interruption. Warning at three
+                // minutes made every night on a dozing phone look like a failure.
+                await page.evaluate(async () => {
+                    __mock.state.running = true; __mock.state.serviceHeartbeatAt = Date.now() - 5 * 60000;
+                    await window.refreshNative(true);
+                });
                 assert.doesNotMatch(await page.locator('#content').innerText(), /守候服务已中断/);
-                await page.evaluate(async () => { __mock.state.enabled = false; await window.refreshNative(true); });
+                assert.doesNotMatch(await page.locator('#content').innerText(), /最近任务/);
+
+                // Ten minutes of silence with the service still up is worth a quiet note, not a warning.
+                await page.evaluate(async () => {
+                    __mock.state.serviceHeartbeatAt = Date.now() - 30 * 60000;
+                    await window.refreshNative(true);
+                });
+                const soft = await page.locator('#content').innerText();
+                assert.doesNotMatch(soft, /守候服务已中断/);
+                assert.match(soft, /仍在运行/);
+
+                // A fresh heartbeat and a live service: nothing at all.
+                await page.evaluate(async () => {
+                    __mock.state.serviceHeartbeatAt = Date.now();
+                    await window.refreshNative(true);
+                });
+                const healthy = await page.locator('#content').innerText();
+                assert.doesNotMatch(healthy, /守候服务已中断/);
+                assert.doesNotMatch(healthy, /仍在运行/);
+                await page.evaluate(async () => { __mock.state.enabled = false; __mock.state.running = false; await window.refreshNative(true); });
             });
             await test('a recovered check clears the stale network banner', async () => {
                 await reset();
