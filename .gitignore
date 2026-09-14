@@ -51,3 +51,6 @@ Thumbs.db
 
 # Upstream release artifacts stay out of this repository
 release/
+
+# Local AI handoff notes: keep on disk, do not publish
+AI-HANDOFF.md
