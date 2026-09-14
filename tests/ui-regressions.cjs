@@ -14,7 +14,7 @@ const server = http.createServer((req, res) => {
     const name = new URL(req.url, 'http://localhost').pathname.slice(1) || 'index.html';
     // The app serves anchor art from its own /avatar/ route; the real 1x1 PNG here is what lets
     // the scenarios assert that images actually render instead of degrading to placeholders.
-    if (name.startsWith('avatar/') || name.startsWith('schedule/')) {
+    if (name.startsWith('avatar/') || name.startsWith('schedule/') || name === 'background/current') {
         res.setHeader('Content-Type', 'image/png');
         res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
         return;
@@ -115,6 +115,8 @@ function installMock() {
             const now = new Date();
             const md = (now.getMonth()+1)+'/'+now.getDate();
             setTimeout(() => reply(id, '4|20:00|22:30||AI游戏'+String.fromCharCode(10)+'5|21:00|||AI杂谈'+String.fromCharCode(10)+'|19:00||'+md+'|生日会'), 0); return; }
+        if (action === 'pickBackground') { mock.pickedBackground = true; setTimeout(() => reply(id, true), 0); return; }
+        if (action === 'removeBackground') { mock.removedBackground = true; state.backgroundSet = false; state.backgroundName = ''; setTimeout(() => reply(id, true), 0); return; }
         if (action === 'refreshAvatars') { mock.refreshedAvatars = true; setTimeout(() => reply(id, state.anchors.length), 0); return; }
         if (action === 'deleteAnchor') {
             mock.lastDeleted = patch.id;
@@ -635,6 +637,17 @@ function installMock() {
                 assert.match(await page.locator('#schedule-editor').innerText(), /删除图片/);
                 await page.locator('[data-action="removeScheduleImage"]').click(); await settle();
                 assert.equal(await page.evaluate(() => __mock.lastRemoveImage), 'hazel');
+            });
+            await test('the background picture renders and can be removed', async () => {
+                await reset('settings');
+                await page.evaluate(async () => { __mock.state.backgroundSet = true; __mock.state.backgroundName = '夜色.png'; await window.refreshNative(true); });
+                assert.equal(await page.evaluate(() => document.body.classList.contains('has-bg')), true);
+                const url = await page.evaluate(() => document.getElementById('bg-layer').style.backgroundImage);
+                assert.match(url, /\/background\/current/);
+                await page.waitForFunction(() => { const i = document.getElementById('bg-layer'); const u = i && i.style.backgroundImage; return !!u; });
+                await page.locator('[data-action="removeBackground"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.removedBackground), true);
+                assert.equal(await page.evaluate(() => document.body.classList.contains('has-bg')), false);
             });
             await test('picking a schedule image repaints the editor immediately', async () => {
                 await reset('anchors');

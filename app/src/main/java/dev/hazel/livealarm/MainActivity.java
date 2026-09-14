@@ -94,8 +94,12 @@ public class MainActivity extends Activity {
                     catch(IOException e){return emptyResponse();}
                 }
                 if("https".equals(u.getScheme())&&HOST.equals(u.getHost())&&path!=null&&path.startsWith("/background/")&&!path.contains("..")){
-                    // Only the exact owned file name pattern resolves; anything else is 404.
-                    java.io.File art=BackgroundStore.resolve(MainActivity.this,path.substring(12));
+                    // "/background/current" is the stable address the UI asks for: the stored
+                    // file name is a private UUID, so the page never has to know it. Any other
+                    // segment must still be a real owned file name.
+                    String segment=path.substring(12);
+                    String stored="current".equals(segment)?prefs.raw().getString("backgroundPath",""):segment;
+                    java.io.File art=BackgroundStore.resolve(MainActivity.this,stored);
                     if(art==null)return emptyResponse();
                     try{Map<String,String> headers=new HashMap<>();headers.put("Cache-Control","no-store");headers.put("X-Content-Type-Options","nosniff");return new WebResourceResponse("image/jpeg","UTF-8",200,"OK",headers,new FileInputStream(art));}
                     catch(IOException e){return emptyResponse();}

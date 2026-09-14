@@ -115,7 +115,7 @@ function applyTheme() {
   const layer = document.getElementById("bg-layer");
   if (layer) {
     if (S.backgroundSet) {
-      layer.style.backgroundImage = "url(/background/bg.jpg)";
+      layer.style.backgroundImage = "url(/background/current)";
       document.body.classList.add("has-bg");
     } else {
       layer.style.backgroundImage = "";
@@ -929,6 +929,25 @@ async function perform(action, anchorId = "") {
   }
   if (action === "deleteAnchor") {
     askDeleteAnchor();
+    return;
+  }
+  if (action === "pickBackground") {
+    try {
+      await api("pickBackground", {}, 6e4);
+      toast("已选择图片，正在导入…");
+    } catch (e) {
+      toast(e.message);
+    }
+    return;
+  }
+  if (action === "removeBackground") {
+    try {
+      await api("removeBackground", {});
+      await window.refreshNative(true);
+      toast("背景已移除");
+    } catch (e) {
+      toast(e.message);
+    }
     return;
   }
   if (action === "confirmDeleteAnchor") {

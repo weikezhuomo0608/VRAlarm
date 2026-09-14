@@ -45,7 +45,7 @@ function applyTheme(){const c=S.config,night=c.theme==='dark'||(c.theme==='syste
     vars.setProperty('--card',`rgba(${base[0]},${base[1]},${base[2]},${op})`);
     const layer=document.getElementById('bg-layer');
     if(layer){
-        if(S.backgroundSet){layer.style.backgroundImage='url(/background/bg.jpg)';document.body.classList.add('has-bg');}
+        if(S.backgroundSet){layer.style.backgroundImage='url(/background/current)';document.body.classList.add('has-bg');}
         else{layer.style.backgroundImage='';document.body.classList.remove('has-bg');}
         vars.setProperty('--bg-dim',String(Math.min(90,Math.max(0,Number(c.backgroundDim)||0))/100));
     }
@@ -495,6 +495,17 @@ async function perform(action,anchorId=''){
     if(action==='refreshAvatar'){await refreshAvatarDraft();return;}
     if(action==='saveAnchorDraft'){await saveAnchorDraft();return;}
     if(action==='deleteAnchor'){askDeleteAnchor();return;}
+    if(action==='pickBackground'){
+        // The picker answers immediately; the import lands later and pushes fresh state.
+        try{await api('pickBackground',{},60000);toast('已选择图片，正在导入…');}
+        catch(e){toast(e.message);}
+        return;
+    }
+    if(action==='removeBackground'){
+        try{await api('removeBackground',{});await window.refreshNative(true);toast('背景已移除');}
+        catch(e){toast(e.message);}
+        return;
+    }
     if(action==='confirmDeleteAnchor'){await removeAnchor();return;}
     if(action==='enableAccessibility'){closeModal();await api('permission',{kind:'accessibility'});return;}if(action==='start'){await toggleWatch(true);return;}
     if(action==='test'||action==='testLater'){if(!alarmAvailable()){compatibilityInfo(action);return;}const value=await api(action);closeModal();if(native&&action==='testLater')toast('15 秒后响铃，现在可以锁屏');await window.refreshNative(true);return;}
