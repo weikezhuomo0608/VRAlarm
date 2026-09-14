@@ -7,7 +7,7 @@ const icon=(name,extra='')=>`<svg class="i ${extra}" viewBox="0 0 24 24" aria-hi
 let seq=0,awaiting=new Map(),native=typeof window.HazelNative!=='undefined',route='home',S=null,configFingerprint='',busy=false,ruleDraft=null,alarmPainted=false,zoneList=[];
 let compatibilityAction=null,compatibilitySaving=false,anchorDraft=null;
 const defaults={soundWithoutNotifications:false,allDay:true,timezone:'device',catchUp:false,pollSeconds:30,reliable:true,boot:true,ringtone:'starlight',customName:'未选择',volume:85,ramp:true,vibrate:true,duration:60,snoozeMinutes:5,quietCalls:true,theme:'light',preStream:true,ringQueue:false,aiOcr:true,aiKey:'',aiModel:'deepseek-flash',seedColor:'',amoled:false,hideRecents:false,recovery:true,backgroundDim:40,cardOpacity:94,windows:[{id:'night',name:'凌晨守候',start:60,end:360,days:127,enabled:true}]};
-const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.4',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
+const previewState={config:clone(defaults),enabled:false,running:false,ringing:false,snapshot:{},anchors:[{id:'hazel',name:'灰泽满 Hazel',uid:1298779265,room:1713546334,enabled:true,avatar:false,snapshot:{}}],networkError:'',serviceError:'',startError:'',inside:true,permissions:{notifications:false,alarmChannel:true,battery:false,fullScreen:false,exact:false,dnd:false,alarmVolume:4,alarmMax:7},zone:Intl.DateTimeFormat().resolvedOptions().timeZone,deviceZone:Intl.DateTimeFormat().resolvedOptions().timeZone,version:'1.1.5',preview:true,now:Date.now(),snoozeAt:0,testAt:0,backgroundName:'',backgroundSet:false,recoveryAt:0};
 if(!native)$('#preview').textContent='界面预览 · 检测与响铃功能请安装安卓应用体验';
 window.NativeReply=(id,result)=>{const p=awaiting.get(id);if(!p)return;clearTimeout(p.timer);awaiting.delete(id);result.ok?p.resolve(result.value):p.reject(new Error(result.error));};
 function api(action,data={},timeoutMs=10000){
@@ -435,7 +435,7 @@ function week(){
     const today=(new Date().getDay()+6)%7;
     const rows=list.flatMap(a=>(a.schedule||[]).map(e=>({a,e})));
     let html=heading('WEEKLY TIMELINE','这一周，谁在等你。','来自主播周表；是否响铃仍由时段与响铃开关决定。');
-    if(!rows.length&&!list.some(a=>a.scheduleImage))html+='<div class="card"><p class="sub">还没有任何周表。到“主播”页，在主播卡片上点「周表」添加安排；也可以粘贴周表文字识别，或上传周表图片。</p><button class="text-button" data-route="anchors">去主播页 '+icon('arrow')+'</button></div>';
+    if(!rows.length&&!list.some(a=>a.scheduleImage))html+='<div class="card sched-empty"><div class="row"><div class="label-icon">'+icon('calendar')+'</div><div class="grow"><strong>还没有周表</strong><p class="sub">到“主播”页，在主播卡片上点「周表」添加安排；也可以粘贴周表文字识别，或上传周表图片。</p></div></div><button class="secondary" data-route="anchors">去主播页添加 '+icon('arrow')+'</button></div>';
     for(let off=0;off<7;off++){
         const d=(today+off)%7;
         const dayRows=rows.filter(pair=>pair.e.days&(1<<d)).sort((x,y)=>x.e.start-y.e.start);
@@ -446,7 +446,9 @@ function week(){
             const live=(a.snapshot||{}).status===1&&a.enabled;
             const t=time(e.start)+(e.end>=0?' – '+time(e.end):'');
             const cov=live&&a.snapshot&&a.snapshot.cover?'<img class="sched-cover" src="/cover/?u='+encodeURIComponent(a.snapshot.cover)+'" alt="">':'';
-            return '<article class="card sched-card '+(a.enabled?'':'disabled-rule')+'"><div class="row">'+anchorArt(a)+'<div class="grow"><div class="anchor-name">'+esc(a.name)+'</div><div class="live-info"><span class="dot '+(live?'live':'')+'"></span><span class="live-state">'+(live?'正在直播':'计划开播')+'</span>'+(e.note?'<small class="sub"> · '+esc(e.note)+'</small>':'')+'</div></div>'+cov+'<strong>'+t+'</strong></div></article>';
+            // The time and the live thumbnail get their own column: sharing one line with the
+            // name squeezed "计划开播" down to a single character per row.
+            return '<article class="card sched-card '+(a.enabled?'':'disabled-rule')+'"><div class="sched-head">'+anchorArt(a)+'<div class="grow"><div class="anchor-name">'+esc(a.name)+'</div><div class="sched-meta"><span class="dot '+(live?'live':'')+'"></span><span class="sched-state">'+(live?'正在直播':'计划开播')+'</span>'+(e.note?'<span class="sched-note">'+esc(e.note)+'</span>':'')+'</div></div><div class="sched-side"><strong class="sched-time">'+t+'</strong>'+cov+'</div></div></article>';
         }).join('');
     }
     const withImg=list.filter(a=>a.scheduleImage);

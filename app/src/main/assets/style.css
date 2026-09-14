@@ -33,5 +33,21 @@ body.dark.amoled{--bg:#000;--soft:#161316;--line:#221f23}
 .sched-img{margin-top:12px}
 .sched-img img{max-width:100%;border-radius:14px;border:1px solid var(--line)}
 
-.sched-cover{width:72px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--line);flex-shrink:0}
+/* Weekly timeline entry. The time and the live thumbnail keep their own column so the name and
+   note are never squeezed; every label here is nowrap, because the previous layout shared one
+   line between four items and wrapped "计划开播" into a single character per row. */
+.sched-card{padding:14px 16px}
+.sched-head{display:flex;align-items:center;gap:12px}
+.sched-head .anchor-art{width:44px;height:44px;border-radius:15px}
+.sched-head .anchor-art .anchor-letter,.sched-head .anchor-art.placeholder{font-size:16px}
+.sched-head .anchor-name{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-meta{display:flex;align-items:center;gap:6px;margin-top:3px;min-width:0}
+.sched-state{font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+.sched-note{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sched-note:before{content:'· '}
+.sched-side{display:flex;flex-direction:column;align-items:flex-end;gap:7px;flex-shrink:0}
+.sched-time{font-size:15px;font-weight:720;color:var(--primary);white-space:nowrap;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+.sched-cover{width:64px;height:40px;border-radius:10px;object-fit:cover;border:1px solid var(--line);flex-shrink:0}
+.sched-empty{padding:22px 18px}
+@media(max-width:360px){.sched-side{max-width:112px}.sched-time{font-size:14px}.sched-head .anchor-art{width:40px;height:40px}}
 .alarm-halo img.cover{width:150px;height:90px;border-radius:22px;object-fit:cover;border:1px solid rgba(255,255,255,.35)}

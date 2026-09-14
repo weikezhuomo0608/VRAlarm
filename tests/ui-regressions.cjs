@@ -623,6 +623,30 @@ function installMock() {
                 assert.match(copy, /正在直播/);
                 assert.doesNotMatch(copy, /周表图片/);
             });
+            await test('week rows keep the state label, name and time on a single line', async () => {
+                await reset();
+                await page.locator('[data-route="week"]').last().click();
+                const m = await page.evaluate(() => {
+                    const read = sel => {
+                        const el = document.querySelector(sel);
+                        if (!el) return null;
+                        const box = el.getBoundingClientRect();
+                        const cs = getComputedStyle(el);
+                        return { h: Math.round(box.height), ws: cs.whiteSpace, text: el.innerText };
+                    };
+                    return { state: read('.sched-state'), time: read('.sched-time'), name: read('.sched-head .anchor-name') };
+                });
+                // Four squeezed items used to share one line, wrapping the state label one
+                // character per row; a single line is the regression guard for that.
+                assert.ok(m.state, 'the row exposes a state label');
+                assert.equal(m.state.ws, 'nowrap');
+                assert.ok(m.state.h <= 20, `state label is one line, got ${m.state.h}px`);
+                assert.ok(m.time && m.time.ws === 'nowrap' && m.time.h <= 26, `time is one line, got ${m.time && m.time.h}px`);
+                assert.ok(m.name && m.name.h <= 26, `name is one line, got ${m.name && m.name.h}px`);
+                // The layout must not fall back to the shared .row / .live-info styles.
+                assert.equal(await page.locator('.sched-card .live-info').count(), 0);
+                assert.equal(await page.locator('.sched-card .sched-head').count(), 1);
+            });
             await test('the schedule editor parses pasted text into confirmed entries', async () => {
                 await reset('anchors');
                 await page.locator('[data-anchor-schedule="hazel"]').click();
