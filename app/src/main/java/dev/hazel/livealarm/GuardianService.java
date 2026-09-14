@@ -227,7 +227,11 @@ public class GuardianService extends Service {
         }catch(RuntimeException e){lastNoticeKey="";prefs.log("warning","守候通知更新未成功","检测仍继续，请检查系统通知设置");}
     }
     private void syncPower(){
-        boolean hold=prefs.enabled()&&prefs.allowed(System.currentTimeMillis())&&prefs.config().optBoolean("reliable");
+        // Continuous mode keeps the lock outside the reminder window too: the window decides
+        // whether to ring, it must not decide whether the phone is allowed to look.
+        boolean continuous=prefs.config().optBoolean("turbo",true);
+        boolean hold=prefs.enabled()&&prefs.config().optBoolean("reliable")
+            &&(continuous||prefs.allowed(System.currentTimeMillis()));
         if(hold){watchLock.acquire(600000);}else release(watchLock);
     }
     /** getActiveNetwork() briefly reports nothing during a Wi-Fi/cellular handover; any usable
@@ -295,7 +299,7 @@ public class GuardianService extends Service {
         if(!hasNetwork()){failed("网络未连接，联网后会自动重试",false);return;}
         ArrayList<Anchors.Anchor> targets=new ArrayList<>();
         for(Anchors.Anchor a:prefs.anchors())if(a.enabled)targets.add(a);
-        if(targets.isEmpty()){updateWatch("当前没有启用中的主播");scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),0));return;}
+        if(targets.isEmpty()){updateWatch("当前没有启用中的主播");scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),0,prefs.config().optBoolean("turbo",true)));return;}
         busy=true;final int expected=generation;final ArrayList<Anchors.Anchor> batch=targets;
         io.execute(()->{
             PowerManager.WakeLock brief=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Hazel:Check");
@@ -324,7 +328,7 @@ public class GuardianService extends Service {
             lastInternalError=detail;
             prefs.log("warning","本次检查未能完成","应用内部错误（"+detail+"），仍会按间隔自动重试");
         }
-        scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),cycleMillis));
+        scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),cycleMillis,prefs.config().optBoolean("turbo",true)));
     }
     /**
      * A cycle that started this long after the service itself asked to be woken is hard evidence
@@ -452,7 +456,7 @@ public class GuardianService extends Service {
             boosted=PollPlan.dueSoon(planned,weekday,sod,now);
         }
         updateWatch(statusText(cfg,liveCount,liveNames,boosted));
-        scheduleNext(PollPlan.gapSeconds(cfg.optInt("pollSeconds",30),inside||boosted,cycleMillis));
+        scheduleNext(PollPlan.gapSeconds(cfg.optInt("pollSeconds",30),inside||boosted,cycleMillis,cfg.optBoolean("turbo",true)));
         WatchWidget.update(this);
         if(cfg.optBoolean("preStream",true)){
             String bestName="";long bestAt=0;
@@ -542,9 +546,17 @@ public class GuardianService extends Service {
         // needs later: an idle plan is allowed to be hours late, because outside the window the
         // phone is expected to sleep, and the gap is deliberate.
         prefs.raw().edit().putLong("nextCheck",now+delay).putBoolean("nextCheckAllowed",prefs.allowed(now)).apply();
-        // Safety net for this loop: three times the delay it just chose for itself, so a cycle
-        // that does come back always replaces it and it only fires when the loop has stalled.
-        AlarmScheduler.at(this,AlarmScheduler.KEEPALIVE,System.currentTimeMillis()+Math.max(90000L,delay*3));
+        // Safety net for this loop: past the delay it just chose for itself, so a cycle that
+        // does come back always replaces it and it only fires when the loop has stalled. In
+        // continuous mode it sits half an interval out and is armed as an alarm-clock alarm,
+        // which is the only wake-up Doze honours; the saver value (three intervals, allow
+        // while idle) is exactly what let a sleeping phone detect a stream nine minutes late.
+        boolean continuous=prefs.config().optBoolean("turbo",true);
+        long netAt=System.currentTimeMillis()+(continuous
+            ?(long)PollPlan.keepAliveSeconds(seconds,true,true)*1000L
+            :Math.max(90000L,delay*3));
+        if(continuous)AlarmScheduler.atDozeProof(this,AlarmScheduler.KEEPALIVE,netAt);
+        else AlarmScheduler.at(this,AlarmScheduler.KEEPALIVE,netAt);
         handler.postDelayed(poll,delay);
     }
     private boolean beginAlarm(String title,boolean test,String anchorId,String anchorName){

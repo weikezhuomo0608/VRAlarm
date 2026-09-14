@@ -31,7 +31,7 @@ function installMock() {
     const state = {
         config: { soundWithoutNotifications: false, allDay: true, timezone: 'device', catchUp: false, pollSeconds: 30,
             reliable: true, boot: true, ringtone: 'starlight', customName: '未选择', volume: 85, aiOcr: true, aiKey: 'sk-test', aiModel: 'deepseek-flash', preStream: true, ringQueue: false,
-            seedColor: '', amoled: false, hideRecents: false, recovery: true, backgroundDim: 40, cardOpacity: 94,
+            seedColor: '', amoled: false, hideRecents: false, recovery: true, turbo: true, backgroundDim: 40, cardOpacity: 94,
             ramp: true, vibrate: true, duration: 60, snoozeMinutes: 5, quietCalls: true, theme: 'light',
             windows: [{ id: 'night', name: '凌晨守候', start: 60, end: 360, days: 127, enabled: true }] },
         enabled: false, running: false, ringing: false, snapshot: {}, networkError: '', serviceError: '', startError: '',
@@ -879,6 +879,14 @@ function installMock() {
                 assert.equal(await page.evaluate(() => document.body.classList.contains('amoled')), true);
                 await page.locator('[data-toggle="hideRecents"]').click(); await settle();
                 assert.equal(await page.evaluate(() => __mock.state.config.hideRecents), true);
+            });
+            await test('continuous mode is on by default and can be switched off', async () => {
+                await reset('settings');
+                const copy = await page.locator('#content').innerText();
+                assert.match(copy, /持续高频守候/);
+                assert.equal(await page.evaluate(() => __mock.state.config.turbo), true);
+                await page.locator('[data-toggle="turbo"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.state.config.turbo), false);
             });
             if (output) {
                 fs.mkdirSync(output, { recursive: true });

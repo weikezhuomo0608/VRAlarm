@@ -20,7 +20,7 @@ public final class Prefs {
         put(j,"volume",85); put(j,"ramp",true); put(j,"vibrate",true); put(j,"duration",60);
         put(j,"snoozeMinutes",5); put(j,"quietCalls",true); put(j,"theme","light");
         put(j,"preStream",true); put(j,"ringQueue",false); put(j,"aiOcr",true); put(j,"aiKey",""); put(j,"aiModel","deepseek-flash");
-        put(j,"seedColor",""); put(j,"amoled",false); put(j,"hideRecents",false); put(j,"recovery",true); put(j,"backgroundDim",40); put(j,"cardOpacity",94);
+        put(j,"turbo",true); put(j,"seedColor",""); put(j,"amoled",false); put(j,"hideRecents",false); put(j,"recovery",true); put(j,"backgroundDim",40); put(j,"cardOpacity",94);
                 JSONArray rules=new JSONArray(); JSONObject w=new JSONObject();
         put(w,"id","night");put(w,"name","凌晨守候");put(w,"start",60);put(w,"end",360);put(w,"days",127);put(w,"enabled",true);
         rules.put(w);put(j,"windows",rules);return j;
@@ -32,7 +32,7 @@ public final class Prefs {
     }
     public synchronized void update(JSONObject patch) throws JSONException {
         JSONObject j=config();
-        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery"};
+        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery","turbo"};
         for(String k:bools) if(patch.has(k)){if(!(patch.get(k) instanceof Boolean))throw new JSONException("开关值无效");put(j,k,patch.getBoolean(k));}
         intSetting(j,patch,"volume",1,100);intSetting(j,patch,"backgroundDim",0,90);intSetting(j,patch,"cardOpacity",75,100);
         if(patch.has("seedColor")){String color=patch.getString("seedColor").trim();if(!color.isEmpty()&&!color.matches("#[0-9a-fA-F]{6}"))throw new JSONException("请输入六位 HEX 颜色，如 #536B81");put(j,"seedColor",color.toUpperCase(java.util.Locale.ROOT));}

@@ -18,6 +18,25 @@ public final class AlarmScheduler {
         try{if(exact(c))a.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,time,p);else a.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,time,p);}
         catch(SecurityException e){a.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,time,p);}
     }
+    /**
+     * An alarm-clock alarm is the one wake-up the platform does not defer: allow-while-idle
+     * alarms are pushed to the Doze floor (about nine minutes), which is precisely the delay
+     * users see when a stream is noticed late. The price is a status-bar alarm icon, so this is
+     * used only by continuous mode.
+     */
+    public static void atDozeProof(Context c,String action,long time){
+        AlarmManager a=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);PendingIntent p=intent(c,action);
+        if(exact(c)){
+            try{a.setAlarmClock(new AlarmManager.AlarmClockInfo(time,showIntent(c)),p);return;}
+            catch(RuntimeException ignored){ /* fall through to the weaker wake-up */ }
+        }
+        try{a.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,time,p);}catch(SecurityException ignored){}
+    }
+    /** Tapping the status-bar alarm icon must land somewhere sensible, not on nothing. */
+    private static PendingIntent showIntent(Context c){
+        Intent i=new Intent(c,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return PendingIntent.getActivity(c,0,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+    }
     public static void boundaries(Context context){
         Prefs p=new Prefs(context);cancel(context,BOUNDARY);if(!p.enabled())return;JSONObject c=p.config();
         long next=TimeRules.nextBoundary(System.currentTimeMillis(),c.optBoolean("allDay"),p.windows(c),TimeRules.zone(c.optString("timezone")));
@@ -48,8 +67,10 @@ public final class AlarmScheduler {
     }
     public static void keepAlive(Context context){
         Prefs p=new Prefs(context);cancel(context,KEEPALIVE);if(!p.enabled())return;
-        long now=System.currentTimeMillis();
-        int seconds=PollPlan.keepAliveSeconds(p.config().optInt("pollSeconds",30),p.allowed(now));
-        at(context,KEEPALIVE,now+seconds*1000L);
+        long now=System.currentTimeMillis();JSONObject c=p.config();
+        boolean continuous=c.optBoolean("turbo",true);
+        int seconds=PollPlan.keepAliveSeconds(c.optInt("pollSeconds",30),p.allowed(now),continuous);
+        if(continuous)atDozeProof(context,KEEPALIVE,now+seconds*1000L);
+        else at(context,KEEPALIVE,now+seconds*1000L);
     }
 }

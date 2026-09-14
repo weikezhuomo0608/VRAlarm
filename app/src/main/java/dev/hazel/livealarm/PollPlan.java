@@ -86,6 +86,35 @@ public final class PollPlan {
     public static final int MIN_KEEPALIVE_SECONDS=90;
 
     /**
+     * Continuous mode (the 「持续高频守候」 switch) exists because the reminder window must decide
+     * whether to RING, not how often to look: outside the window the loop used to idle at three
+     * minutes, so a stream that started just after the window closed was seen minutes late.
+     * In continuous mode the configured interval is used everywhere.
+     */
+    public static int gapSeconds(int pollSeconds, boolean allowed, int cycleMillis, boolean continuous) {
+        return gapSeconds(pollSeconds, continuous||allowed, cycleMillis);
+    }
+    /** Lower bound of the continuous-mode safety net: short intervals must not become a hot loop. */
+    public static final int MIN_TURBO_NET_SECONDS=20;
+
+    /**
+     * When the safety net may fire in continuous mode. It sits just past the loop's own plan
+     * (half an interval of slack), so a healthy loop always replaces it first — the net only
+     * fires when the loop really stalled, such as while the phone is asleep. Three intervals
+     * (the saver value) is useless there: Doze pushes allow-while-idle alarms to its own floor
+     * of about nine minutes, which is exactly the gap users see.
+     */
+    public static int turboNetSeconds(int pollSeconds) {
+        int gap=gapSeconds(pollSeconds,true,0);
+        int slack=Math.max(15,gap/2);
+        int seconds=gap+slack;
+        return seconds<MIN_TURBO_NET_SECONDS?MIN_TURBO_NET_SECONDS:seconds;
+    }
+    public static int keepAliveSeconds(int pollSeconds, boolean allowed, boolean continuous) {
+        return continuous?turboNetSeconds(pollSeconds):keepAliveSeconds(pollSeconds,allowed);
+    }
+
+    /**
      * How late the safety net may fire. It is armed at three times the interval the check loop
      * just scheduled for itself, which is long enough that a healthy loop always replaces it
      * first, and short enough that a stalled loop is noticed within a couple of minutes rather
