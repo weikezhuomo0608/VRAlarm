@@ -62,3 +62,15 @@ AI-HANDOFF.md
 
 # Local agent workspace notes: keep on disk, do not publish
 .workbuddy/
+
+# Internal pet tooling and the source screenshot they consume. They produced
+# app/src/main/assets/pet/*.png on this machine once; the published app only needs
+# the four finished PNGs, so these never ship (see AI-HANDOFF §9.3).
+满区.png
+tools/make_pet_from_screenshot.py
+tools/bake_pet_art.py
+tools/dump_pet_rig.py
+tools/list_pet_textures.py
+tools/render_pet_preview.py
+tools/spine_render.py
+tests/_petdiag.cjs

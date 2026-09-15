@@ -10,7 +10,7 @@
 | `tests` | Java 规则测试、模拟通信界面测试、原生测试 |
 | `tools` | 界面、独立 APK 与原生测试 APK 构建脚本 |
 
-Java 代码的包名为 `dev.hazel.livealarm`，安装后的应用包名为 `dev.hazel.livealarm.multi`（因此多主播版可与单主播版 1.0.5 并存）。当前 `versionName=1.1.9`、`versionCode=33`。应用运行不需要第三方 Android 依赖库；开发测试工具与运行时分开。
+Java 代码的包名为 `dev.hazel.livealarm`，安装后的应用包名为 `dev.hazel.livealarm.multi`（因此多主播版可与单主播版 1.0.5 并存）。当前 `versionName=1.1.8`、`versionCode=40`（对外版本号写作 **1.1.0808 满区版**，见 `README.md` 与 `CHANGELOG.md`）。应用运行不需要第三方 Android 依赖库；开发测试工具与运行时分开。
 
 **Windows 提示**：路径参数请用 Windows 形式（如 `W:/android-sdk/...`），不要用 Git Bash 的 `/w/android-sdk/...`——Windows 上的 Python 不认 MSYS 路径，会把它解析成 `W:\w\android-sdk\...` 而找不到文件。脚本会自动为 `aapt2`/`zipalign` 补 `.exe` 后缀，但 `javac` 需要先在 `PATH` 里。
 
