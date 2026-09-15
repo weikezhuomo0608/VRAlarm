@@ -125,7 +125,11 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=30){WindowInsetsController c=getWindow().getInsetsController();if(c!=null)c.setSystemBarsAppearance(dark?0:WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS|WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS|WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);}
         else{int flags=web.getSystemUiVisibility();web.setSystemUiVisibility(dark?flags&~(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR):flags|View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);}
     }
-    @Override protected void onResume(){super.onResume();resumed=true;visible=new java.lang.ref.WeakReference<>(this);alarmOpening=false;if(web!=null)web.onResume();if(prefs!=null){NotificationAccess.record(this,prefs,"activity_resume",true);if(!alarmPage()&&prefs.enabled()&&!GuardianService.running)GuardianService.send(this,"CHECK");}refreshPermissionsAfterReturn();}
+    @Override protected void onResume(){super.onResume();resumed=true;visible=new java.lang.ref.WeakReference<>(this);alarmOpening=false;if(web!=null)web.onResume();if(prefs!=null){NotificationAccess.record(this,prefs,"activity_resume",true);
+        // Returning to the page is a good moment to rescue a watch the system killed — but not
+        // outside the schedule, where a stopped service is the intended state. Starting it there
+        // would only produce a notification that appears and disappears.
+        if(!alarmPage()&&prefs.enabled()&&prefs.watchingNow()&&!GuardianService.running)GuardianService.send(this,"CHECK");}refreshPermissionsAfterReturn();}
     @Override protected void onPause(){resumed=false;if(visible.get()==this)visible.clear();alarmOpening=false;permissionHandler.removeCallbacks(permissionRefresh);if(web!=null)web.onPause();super.onPause();}
     @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused&&resumed){refreshPermissionsAfterReturn();if(GuardianService.ringing)revealAlarm();}}
     @Override protected void onDestroy(){resumed=false;permissionHandler.removeCallbacksAndMessages(null);if(web!=null){web.removeJavascriptInterface("HazelNative");web.destroy();web=null;}io.shutdownNow();super.onDestroy();}
@@ -160,6 +164,12 @@ public class MainActivity extends Activity {
         Prefs.put(j,"snapshot",primarySnapshot());Prefs.put(j,"anchors",anchorStates());Prefs.put(j,"networkError",prefs.raw().getString("networkError",""));Prefs.put(j,"serviceError",prefs.raw().getString("serviceError",""));
         Prefs.put(j,"startError",prefs.raw().getString("startError",""));
         Prefs.put(j,"nextCheck",prefs.raw().getLong("nextCheck",0));Prefs.put(j,"serviceHeartbeatAt",prefs.raw().getLong("serviceHeartbeatAt",0));Prefs.put(j,"snoozeAt",prefs.raw().getLong("snoozeAt",0));Prefs.put(j,"testAt",prefs.raw().getLong("testAt",0));Prefs.put(j,"inside",prefs.allowed(System.currentTimeMillis()));
+        // Outside the schedule the watch is parked on purpose, so a stopped service must not be
+        // read as a failure. These two are what tell the page the difference, and nextBoundary
+        // (below) is when the watch comes back. hasWindow separates "between two windows" from
+        // "custom mode with no rule switched on", which is paused forever rather than for a while.
+        Prefs.put(j,"schedulePaused",prefs.enabled()&&!prefs.watchingNow());
+        Prefs.put(j,"hasWindow",TimeRules.hasWindow(prefs.windows(prefs.config())));
         JSONObject c=prefs.config();Prefs.put(j,"zone",TimeRules.zone(c.optString("timezone")).getId());Prefs.put(j,"deviceZone",ZoneId.systemDefault().getId());
         Prefs.put(j,"now",System.currentTimeMillis());Prefs.put(j,"nextBoundary",TimeRules.nextBoundary(System.currentTimeMillis(),c.optBoolean("allDay"),prefs.windows(c),TimeRules.zone(c.optString("timezone"))));
         Prefs.put(j,"permissions",permissions());Prefs.put(j,"permissionsCheckedAt",System.currentTimeMillis());

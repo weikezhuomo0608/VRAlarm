@@ -53,7 +53,10 @@ public final class NotificationAccess {
             if(item.getId()==GuardianService.WATCH_ID&&c.getPackageName().equals(item.getPackageName()))registered=true;
             queried=true;
         }catch(RuntimeException ignored){}
-        Prefs.put(j,"status",WatchStatus.resolve(prefs.enabled(),GuardianService.running,granted,appEnabled,importance,groupBlocked,queried,registered));
+        // Outside the schedule a stopped service is the correct state, so "paused" has to be told
+        // before the liveness reading: watchingNow() is the same answer the service itself uses.
+        boolean paused=prefs.enabled()&&!prefs.watchingNow();
+        Prefs.put(j,"status",WatchStatus.resolve(prefs.enabled(),GuardianService.running,granted,appEnabled,importance,groupBlocked,queried,registered,paused));
         Prefs.put(j,"serviceRunning",GuardianService.running);Prefs.put(j,"registered",queried?registered:JSONObject.NULL);
         Prefs.put(j,"channelImportance",importance);Prefs.put(j,"channelBlocked",importance==0||groupBlocked);
         Prefs.put(j,"serviceStartedAt",prefs.raw().getLong("serviceStartedAt",0));Prefs.put(j,"heartbeatAt",prefs.raw().getLong("serviceHeartbeatAt",0));

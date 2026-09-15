@@ -188,7 +188,13 @@ public class GuardianService extends Service {
         if("TEST".equals(action)){cancelTest();beginAlarm("请确认锁屏、音量和振动是否符合预期",true,"","");if(prefs.enabled()){AlarmScheduler.boundaries(this);check(false);}return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
         if("CANCEL_TEST".equals(action)){cancelTest();if(testing)finishAlarm("dismiss",false);if(!prefs.enabled()&&!ringing)stopSelf();return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
         if("SNOOZE_FIRE".equals(action)){snoozeCheck=true;check(true);return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
-        if(prefs.enabled()){WatchRecovery.schedule(this,false);syncPower();AlarmScheduler.boundaries(this);AlarmScheduler.watchdog(this);refreshNotices(false);check(false);return START_STICKY;}
+        if(prefs.enabled()){
+            // A start request that arrives outside the schedule (a stale keep-alive, the widget, a
+            // settings change) must leave the device parked rather than wake the watch up for one
+            // cycle. check() would park it anyway; doing it here skips the notification flash.
+            if(!ringing&&!testing&&!prefs.watchingNow()){noteDuty(true);pauseWatch();return START_NOT_STICKY;}
+            WatchRecovery.schedule(this,false);syncPower();AlarmScheduler.boundaries(this);AlarmScheduler.watchdog(this);refreshNotices(false);check(false);return START_STICKY;
+        }
         if(!ringing)stopSelf();return START_NOT_STICKY;
     }
     private void snoozeAlarm(){
@@ -227,11 +233,11 @@ public class GuardianService extends Service {
         }catch(RuntimeException e){lastNoticeKey="";prefs.log("warning","守候通知更新未成功","检测仍继续，请检查系统通知设置");}
     }
     private void syncPower(){
-        // Continuous mode keeps the lock outside the reminder window too: the window decides
-        // whether to ring, it must not decide whether the phone is allowed to look.
-        boolean continuous=prefs.config().optBoolean("turbo",true);
+        // The schedule now decides whether the watch runs at all, so it also decides whether the
+        // lock may be held. Continuous mode still changes something inside the window: the lock
+        // stays held through it instead of only while a cycle is running.
         boolean hold=prefs.enabled()&&prefs.config().optBoolean("reliable")
-            &&(continuous||prefs.allowed(System.currentTimeMillis()));
+            &&prefs.watchingNow();
         if(hold){watchLock.acquire(600000);}else release(watchLock);
     }
     /** getActiveNetwork() briefly reports nothing during a Wi-Fi/cellular handover; any usable
@@ -294,12 +300,18 @@ public class GuardianService extends Service {
         // made a long cycle (each anchor may spend two 17 s timeouts plus a retry) report itself
         // as an interruption.
         if(busy)return;
+        // Outside the chosen schedule the watch is off, not merely slow: nothing may leave the
+        // device, so the loop parks instead of crawling. A ring already under way is the one
+        // exception — cutting an alarm short is worse than one extra cycle, so it keeps the loop
+        // alive until it is dismissed or times out, and the very next cycle parks it.
+        if(!ringing&&!testing&&!prefs.watchingNow()){noteDuty(true);pauseWatch();return;}
+        noteDuty(false);
         noteInterruption();
         handler.removeCallbacks(poll);syncPower();
         if(!hasNetwork()){failed("网络未连接，联网后会自动重试",false);return;}
         ArrayList<Anchors.Anchor> targets=new ArrayList<>();
         for(Anchors.Anchor a:prefs.anchors())if(a.enabled)targets.add(a);
-        if(targets.isEmpty()){updateWatch("当前没有启用中的主播");scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),0,prefs.config().optBoolean("turbo",true)));return;}
+        if(targets.isEmpty()){updateWatch("当前没有启用中的主播");scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),0));return;}
         busy=true;final int expected=generation;final ArrayList<Anchors.Anchor> batch=targets;
         io.execute(()->{
             PowerManager.WakeLock brief=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Hazel:Check");
@@ -319,6 +331,38 @@ public class GuardianService extends Service {
         });
     }
     /**
+     * Outside the schedule nothing may run. Parking is not "the loop slowed down": the loop, its
+     * keep-alive chain, the recovery check and the wake lock all stop, and the next window
+     * boundary is the only thing that brings the watch back. Idempotent, so the boundary alarm,
+     * the watchdog and a just-finished cycle can all ask for it without piling up.
+     */
+    private void pauseWatch(){
+        handler.removeCallbacks(poll);
+        AlarmScheduler.cancel(this,AlarmScheduler.KEEPALIVE);
+        // Recovery would only keep asking for a service that is not supposed to exist right now.
+        WatchRecovery.cancel(this);
+        release(watchLock);
+        prefs.raw().edit().putLong("nextCheck",0).putBoolean("nextCheckAllowed",false).apply();
+        // The wake-up that ends the pause. It has to survive Doze, because a window usually opens
+        // while the phone is asleep — see AlarmScheduler.boundaries().
+        AlarmScheduler.boundaries(this);
+        // Kept as the second net: if that boundary alarm is ever lost, the watchdog still fires
+        // inside a window and starts the watch again (see ActionReceiver).
+        AlarmScheduler.watchdog(this);
+        WatchWidget.update(this);
+        if(!ringing)stopSelf();
+    }
+    /**
+     * One record per change of duty, never one per cycle: the record page should show when the
+     * watch parked and when it came back, not fill up with the two transitions a day.
+     */
+    private void noteDuty(boolean parked){
+        if(prefs.raw().getBoolean("schedPaused",false)==parked)return;
+        prefs.raw().edit().putBoolean("schedPaused",parked).apply();
+        if(parked)prefs.log("system","已到时段外，守候已暂停","不再检测开播，也不会联网；进入下一个时段时自动恢复");
+        else prefs.log("system","进入提醒时段，守候已恢复","按设定的检测间隔继续检查开播");
+    }
+    /**
      * A rule failure must be visible, but it must never kill the cycle: without the reschedule
      * below the watch would keep looking healthy while nothing was ever checked again.
      */
@@ -328,7 +372,7 @@ public class GuardianService extends Service {
             lastInternalError=detail;
             prefs.log("warning","本次检查未能完成","应用内部错误（"+detail+"），仍会按间隔自动重试");
         }
-        scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),cycleMillis,prefs.config().optBoolean("turbo",true)));
+        scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),cycleMillis));
     }
     /**
      * A cycle that started this long after the service itself asked to be woken is hard evidence
@@ -447,16 +491,11 @@ public class GuardianService extends Service {
         long sod=day.atStartOfDay(zone).toInstant().toEpochMilli();
         int weekday=day.getDayOfWeek().getValue()-1;
         boolean inside=TimeRules.contains(now,allDay,windows,zone);
-        boolean boosted=false;
-        if(!inside){
-            // Outside the reminder window the cycle idles at three minutes; a scheduled start
-            // nearby lifts it back to the configured pace so detection is punctual after all.
-            ArrayList<Schedule.Entry> planned=new ArrayList<>();
-            for(Anchors.Anchor a:prefs.anchors())if(a.enabled)planned.addAll(prefs.schedule(a.id));
-            boosted=PollPlan.dueSoon(planned,weekday,sod,now);
-        }
-        updateWatch(statusText(cfg,liveCount,liveNames,boosted));
-        scheduleNext(PollPlan.gapSeconds(cfg.optInt("pollSeconds",30),inside||boosted,cycleMillis,cfg.optBoolean("turbo",true)));
+        // Nothing lifts the pace for a nearby scheduled start any more: outside the window there is
+        // no cycle left to lift, and inside it the pace is already the configured one. A window
+        // that opens exactly on a scheduled start is made punctual by the boundary alarm instead.
+        updateWatch(statusText(cfg,liveCount,liveNames));
+        scheduleNext(PollPlan.gapSeconds(cfg.optInt("pollSeconds",30),inside,cycleMillis));
         WatchWidget.update(this);
         if(cfg.optBoolean("preStream",true)){
             String bestName="";long bestAt=0;
@@ -474,8 +513,11 @@ public class GuardianService extends Service {
             AlarmScheduler.preStream(this,startAt);
         }else AlarmScheduler.cancel(this,AlarmScheduler.PRESTREAM);
     }
-    private String statusText(JSONObject cfg,int liveCount,String liveNames,boolean boosted){
-        if(!prefs.allowed(System.currentTimeMillis()))return boosted?"临近周表开播 · 高频检查中":"当前不在提醒时段 · 低频检查中";
+    private String statusText(JSONObject cfg,int liveCount,String liveNames){
+        // Only reachable transiently: a cycle that began inside the window and finished after it
+        // closed. The next scheduleNext() parks the watch, and that is where the real wording is
+        // (the home page reads the schedule itself rather than this string).
+        if(!prefs.allowed(System.currentTimeMillis()))return "已到时段外 · 守候即将暂停";
         if(liveCount==1)return liveNames+" 正在直播 · 本场自动去重";
         if(liveCount>1)return liveCount+" 位主播正在直播 · 本场自动去重";
         return "等待开播 · 每 "+cfg.optInt("pollSeconds",30)+" 秒检查";
@@ -540,6 +582,9 @@ public class GuardianService extends Service {
     private void scheduleNext(int seconds){
         handler.removeCallbacks(poll);AlarmScheduler.cancel(this,AlarmScheduler.KEEPALIVE);
         if(!prefs.enabled())return;
+        // A cycle that crossed the end of the window parks the watch here instead of planning a
+        // slow one: outside the schedule there is nothing to slow down, only something to stop.
+        if(!ringing&&!testing&&!prefs.watchingNow()){noteDuty(true);pauseWatch();return;}
         long now=System.currentTimeMillis();
         long delay=seconds*1000L+(long)(Math.random()*900);
         // Whether this plan was made inside the reminder window is what the interruption check

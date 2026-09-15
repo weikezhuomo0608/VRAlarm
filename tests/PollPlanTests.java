@@ -99,14 +99,24 @@ public final class PollPlanTests {
         check(PollPlan.classifyLate(0,true,true,true,true)==PollPlan.Late.NONE,"a cycle on time is not late at all");
         check(PollPlan.classifyLate(3*3600000L,true,true,true,false)==PollPlan.Late.RESTARTED,"a real restart is reported even if the phone is asleep now");
 
-        check(PollPlan.gapSeconds(30,false,0,false)==PollPlan.IDLE_GAP_SECONDS,"the saver mode still idles outside the window");
-        check(PollPlan.gapSeconds(30,false,0,true)==30,"continuous mode keeps the configured interval outside the window");
-        check(PollPlan.gapSeconds(15,false,5000,true)==10,"continuous mode still discounts the time the cycle spent");
-        check(PollPlan.gapSeconds(1,false,0,true)==PollPlan.MIN_GAP_SECONDS,"continuous mode cannot poll faster than the floor");
+        // Outside the window there is no cycle left to pace: the watch parks itself (see duty()),
+        // so the idle gap survives only as the defensive answer for a cycle that began inside and
+        // finished after the window closed. What used to be "continuous mode keeps the configured
+        // interval outside the window" is now "there is nothing outside the window to keep".
+        check(PollPlan.gapSeconds(30,false,0)==PollPlan.IDLE_GAP_SECONDS,"the idle gap survives as the defensive answer");
+        check(PollPlan.gapSeconds(15,false,5000)==PollPlan.IDLE_GAP_SECONDS,"the idle answer ignores how long that cycle took");
+        check(PollPlan.gapSeconds(1,true,0)==PollPlan.MIN_GAP_SECONDS,"a one-second interval still cannot poll faster than the floor");
+        check(PollPlan.duty(false,false,true,true)==PollPlan.Duty.OFF,"a watch the user switched off is off, not paused");
+        check(PollPlan.duty(false,true,false,false)==PollPlan.Duty.OFF,"switched off wins over any schedule reading");
+        check(PollPlan.duty(true,true,false,false)==PollPlan.Duty.WATCHING,"all-day mode never parks");
+        check(PollPlan.duty(true,false,true,true)==PollPlan.Duty.WATCHING,"inside a window the watch runs");
+        check(PollPlan.duty(true,false,true,false)==PollPlan.Duty.PAUSED,"outside the window the watch parks");
+        check(PollPlan.duty(true,false,false,false)==PollPlan.Duty.PAUSED,"custom mode with no rule switched on is parked forever");
+        check(PollPlan.duty(true,false,false,true)==PollPlan.Duty.PAUSED,"an impossible reading parks instead of watching");
         check(PollPlan.keepAliveSeconds(30,true,true)==45,"continuous mode arms the net half an interval out");
         check(PollPlan.keepAliveSeconds(30,false,true)==45,"continuous mode ignores the window when arming the net");
         check(PollPlan.keepAliveSeconds(30,true,true)<PollPlan.keepAliveSeconds(30,true,false),"continuous mode is far sooner than the saver net");
-        check(PollPlan.keepAliveSeconds(30,true,true)>PollPlan.gapSeconds(30,true,0,true),"the net is still later than the cycle it guards");
+        check(PollPlan.keepAliveSeconds(30,true,true)>PollPlan.gapSeconds(30,true,0),"the net is still later than the cycle it guards");
         check(PollPlan.keepAliveSeconds(1,true,true)>=PollPlan.MIN_TURBO_NET_SECONDS,"the continuous net cannot become a hot loop");
         check(PollPlan.keepAliveSeconds(30,true,true)<=PollPlan.MAX_BACKOFF_SECONDS,"the continuous net stays inside the doze floor's neighbourhood");
 

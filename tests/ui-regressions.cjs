@@ -49,7 +49,7 @@ function installMock() {
                 snapshot: { status: 1, start: 1700000000000, checkedAt: Date.now(), title: '画画中' } },
             { id: 'other', name: '另一位主播', uid: 111222, room: 333444, enabled: false, avatar: false, alarm: true, schedule: [], scheduleImage: false, snapshot: {} }
         ],
-        inside: true, zone: 'Asia/Shanghai', deviceZone: 'Asia/Shanghai', version: '1.2.1',
+        inside: true, schedulePaused: false, hasWindow: true, nextBoundary: 0, zone: 'Asia/Shanghai', deviceZone: 'Asia/Shanghai', version: '1.2.1',
         watchNotification: {status:'stopped',serviceRunning:false,registered:false,channelImportance:2},
         preview: false, now: Date.now(), snoozeAt: 0, testAt: 0, serviceHeartbeatAt: Date.now(), backgroundName: '', backgroundSet: false, recoveryAt: Date.now(),
         permissions: { notifications: false, notificationRuntime: false, notificationAppEnabled: false,
@@ -552,6 +552,57 @@ function installMock() {
                 assert.doesNotMatch(healthy, /守候服务已中断/);
                 assert.doesNotMatch(healthy, /仍在运行/);
                 await page.evaluate(async () => { __mock.state.enabled = false; __mock.state.running = false; await window.refreshNative(true); });
+            });
+            await test('outside the schedule the watch is paused, never interrupted', async () => {
+                await reset();
+                // The service is stopped because the schedule says so: outside a window the app
+                // parks itself and holds no wake lock. Reading that as an interruption would send
+                // the user hunting a problem that does not exist — nothing would be wrong in the
+                // system settings, because nothing is wrong at all.
+                await page.evaluate(async () => {
+                    __mock.state.enabled = true; __mock.state.running = false;
+                    __mock.state.inside = false; __mock.state.schedulePaused = true;
+                    __mock.state.nextBoundary = Date.now() + 3 * 3600000;
+                    __mock.state.serviceHeartbeatAt = Date.now() - 30 * 60000;
+                    await window.refreshNative(true);
+                });
+                const paused = await page.locator('#content').innerText();
+                assert.doesNotMatch(paused, /守候服务已中断/);
+                assert.doesNotMatch(paused, /最近任务/);
+                assert.match(paused, /时段外 · 守候已暂停/);
+                assert.match(paused, /不联网、不检测开播/);
+                // The resume moment comes from the schedule, so the page can promise it.
+                assert.match(paused, /\d{2}:\d{2} 进入时段时自动恢复/);
+
+                // Custom mode with every rule switched off has no next window at all: that is a
+                // mistake rather than a quiet hour, and the page has to say which one it is.
+                await page.evaluate(async () => {
+                    __mock.state.hasWindow = false; __mock.state.nextBoundary = 0;
+                    await window.refreshNative(true);
+                });
+                const empty = await page.locator('#content').innerText();
+                assert.match(empty, /没有任何启用中的时段/);
+                assert.match(empty, /去设置时段/);
+                assert.doesNotMatch(empty, /守候服务已中断/);
+
+                // The schedule page states the rule that governs the whole watch, and repeats the
+                // warning where the user can actually fix it.
+                await page.evaluate(async () => {
+                    __mock.state.config.allDay = false;
+                    __mock.state.config.windows = [{ id: 'night', name: '凌晨守候', start: 60, end: 360, days: 127, enabled: false }];
+                    await window.refreshNative(true);
+                });
+                await page.locator('[data-route="schedule"]').last().click(); await settle();
+                const schedulePage = await page.locator('#content').innerText();
+                assert.match(schedulePage, /时段之外守候会自动暂停/);
+                assert.match(schedulePage, /没有任何启用中的时段/);
+
+                await page.evaluate(async () => {
+                    __mock.state.config.windows = [{ id: 'night', name: '凌晨守候', start: 60, end: 360, days: 127, enabled: true }];
+                    __mock.state.enabled = false; __mock.state.inside = true;
+                    __mock.state.schedulePaused = false; __mock.state.hasWindow = true;
+                    await window.refreshNative(true);
+                });
             });
             await test('a recovered check clears the stale network banner', async () => {
                 await reset();

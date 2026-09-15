@@ -17,7 +17,11 @@ public class WatchWidget extends AppWidgetProvider {
         Prefs p=new Prefs(c);
         RemoteViews v=new RemoteViews(c.getPackageName(),R.layout.watch_widget);
         boolean enabled=p.enabled();
-        v.setTextViewText(R.id.widget_title,enabled?p.raw().getString("watchTitle","正在守候主播"):"守候未开启");
+        // Outside the schedule the watch is parked on purpose. Saying "暂未开播" there would report
+        // a snapshot taken before the window closed as if it were current, so the glance says the
+        // watch is paused instead.
+        boolean watching=p.watchingNow(),paused=enabled&&!watching;
+        v.setTextViewText(R.id.widget_title,enabled?(watching?p.raw().getString("watchTitle","正在守候主播"):"时段外 · 守候暂停"):"守候未开启");
         StringBuilder live=new StringBuilder();
         for(Anchors.Anchor a:p.anchors()){
             if(!a.enabled)continue;
@@ -26,7 +30,7 @@ public class WatchWidget extends AppWidgetProvider {
                 live.append(a.name);
             }
         }
-        v.setTextViewText(R.id.widget_live,live.length()>0?"🔴 正在直播："+live:"⚪ 暂未开播");
+        v.setTextViewText(R.id.widget_live,paused?"⏸ 时段外不检测":live.length()>0?"🔴 正在直播："+live:"⚪ 暂未开播");
         long preAt=p.raw().getLong("preStreamAt",0);
         String preName=p.raw().getString("preStreamName","");
         // preStreamAt is the scheduled start itself, so it is printed without re-adding the lead.

@@ -35,9 +35,33 @@ public final class PollPlan {
         return (int)(seconds>MAX_BACKOFF_SECONDS?MAX_BACKOFF_SECONDS:seconds);
     }
 
+    /** What the watch should be doing right now; see duty(). */
+    public enum Duty { OFF, PAUSED, WATCHING }
+
+    /**
+     * The reminder window used to decide only whether a live stream would ring, while the loop
+     * kept polling slowly around the clock. It now decides whether the watch runs at all: outside
+     * the window nothing may leave the device, so the service parks itself and the next window
+     * boundary is the only thing that brings it back.
+     *
+     * PAUSED is also what an unusable custom schedule produces — custom mode with every rule
+     * switched off, or with no rule at all. Nothing is watching there either, and calling that
+     * "paused" (rather than quietly looking healthy) is what lets the UI say so out loud.
+     */
+    public static Duty duty(boolean enabled, boolean allDay, boolean hasEnabledWindow, boolean insideWindow) {
+        if (!enabled) return Duty.OFF;
+        if (allDay) return Duty.WATCHING;
+        if (!hasEnabledWindow) return Duty.PAUSED;
+        return insideWindow ? Duty.WATCHING : Duty.PAUSED;
+    }
+
     /**
      * pollSeconds describes one anchor, so time already spent polling is discounted:
      * otherwise the interval per anchor would grow with the size of the list.
+     *
+     * The `allowed == false` answer is now only a defensive one: outside the reminder window the
+     * watch is paused outright (see duty()), so no cycle is ever planned there. It is kept because
+     * a cycle that started inside the window can still finish after the window closed.
      */
     public static int gapSeconds(int pollSeconds, boolean allowed, int cycleMillis) {
         if (!allowed) return IDLE_GAP_SECONDS;
@@ -46,7 +70,13 @@ public final class PollPlan {
         return gap<MIN_GAP_SECONDS?MIN_GAP_SECONDS:gap;
     }
 
-    /** A scheduled start this near lifts the idle gap, and the lift lingers briefly after it. */
+    /**
+     * A scheduled start this near used to lift the idle gap, because outside the reminder window
+     * the loop still crawled along at three minutes and a scheduled stream should not be noticed
+     * late. Outside the window nothing is polled at all now (see duty()), so nothing is left to
+     * lift, and this is kept as the reference definition of 「临近开播」 — the weekly page applies
+     * the same thirty minutes in `ui-src/app.js` to decide which row reads 「正在直播」.
+     */
     public static final int SOON_BEFORE_MINUTES=30, SOON_AFTER_MINUTES=30;
     /**
      * How early the weekly-schedule heads-up is armed. nextStart() subtracts it to produce the
@@ -85,15 +115,6 @@ public final class PollPlan {
     /** Floor for the safety net, so a short poll interval cannot turn it into a hot loop. */
     public static final int MIN_KEEPALIVE_SECONDS=90;
 
-    /**
-     * Continuous mode (the 「持续高频守候」 switch) exists because the reminder window must decide
-     * whether to RING, not how often to look: outside the window the loop used to idle at three
-     * minutes, so a stream that started just after the window closed was seen minutes late.
-     * In continuous mode the configured interval is used everywhere.
-     */
-    public static int gapSeconds(int pollSeconds, boolean allowed, int cycleMillis, boolean continuous) {
-        return gapSeconds(pollSeconds, continuous||allowed, cycleMillis);
-    }
     /** Lower bound of the continuous-mode safety net: short intervals must not become a hot loop. */
     public static final int MIN_TURBO_NET_SECONDS=20;
 

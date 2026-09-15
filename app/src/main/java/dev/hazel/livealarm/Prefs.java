@@ -72,6 +72,21 @@ public final class Prefs {
         return list;
     }
     public boolean allowed(long now){JSONObject c=config();return TimeRules.contains(now,c.optBoolean("allDay"),windows(c),TimeRules.zone(c.optString("timezone")));}
+    /**
+     * Whether the schedule lets the watch run at all right now. Every entry point reads this one
+     * answer — the poll loop, the keep-alive chain, the watchdog, the recovery check, the
+     * accessibility helper, boot and the widget — because outside the window the watch must not run
+     * in any form: no request, no loop, no wake lock, no restart. `allowed` remains the ring-side
+     * question (may this stream be announced); this is the watch-side one (may the device be woken).
+     */
+    public boolean watchingNow(){return watching(System.currentTimeMillis());}
+    public boolean watching(long now){
+        JSONObject c=config();
+        boolean allDay=c.optBoolean("allDay");
+        List<TimeRules.Window> windows=windows(c);
+        boolean inside=TimeRules.contains(now,allDay,windows,TimeRules.zone(c.optString("timezone")));
+        return PollPlan.duty(enabled(),allDay,TimeRules.hasWindow(windows),inside)==PollPlan.Duty.WATCHING;
+    }
     public boolean enabled(){return db.getBoolean("enabled",false);}
     public synchronized void setEnabled(boolean value){
         SharedPreferences.Editor e=db.edit().putBoolean("enabled",value);

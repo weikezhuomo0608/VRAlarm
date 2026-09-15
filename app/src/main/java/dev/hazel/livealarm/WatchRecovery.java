@@ -18,7 +18,9 @@ public final class WatchRecovery {
     }
     public static void schedule(Context c,boolean reset){
         Prefs p=new Prefs(c);
-        if(!p.enabled()||!p.config().optBoolean("recovery",true)){cancel(c);return;}
+        // Outside the schedule the watch is parked on purpose, so a recovery check would only
+        // resurrect a service that is not supposed to be running.
+        if(!p.enabled()||!p.config().optBoolean("recovery",true)||!p.watchingNow()){cancel(c);return;}
         long now=SystemClock.elapsedRealtime(),old=p.raw().getLong("recoveryElapsed",0);
         if(!reset&&old>now+1000&&old<=now+INTERVAL)return;
         long due=now+INTERVAL;
@@ -29,7 +31,7 @@ public final class WatchRecovery {
     }
     public static void receive(Context c){
         Prefs p=new Prefs(c);
-        if(!p.enabled()||!p.config().optBoolean("recovery",true)){cancel(c);return;}
+        if(!p.enabled()||!p.config().optBoolean("recovery",true)||!p.watchingNow()){cancel(c);return;}
         schedule(c,true);
         if(!GuardianService.running){
             p.raw().edit().putLong("lastRecovery",System.currentTimeMillis()).apply();

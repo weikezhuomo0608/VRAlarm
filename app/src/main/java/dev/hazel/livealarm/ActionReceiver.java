@@ -13,6 +13,11 @@ public class ActionReceiver extends BroadcastReceiver {
         if(AlarmScheduler.WATCHDOG.equals(action)){
             if(!p.enabled())return;
             AlarmScheduler.watchdog(context);
+            // Outside the schedule a silent service is the intended state, so nothing here may
+            // report an interruption or start it again. It still keeps firing, which is exactly
+            // what makes it the second net for the resume: if the boundary alarm were ever lost,
+            // the first watchdog that lands inside a window brings the watch back.
+            if(!p.watchingNow())return;
             long beat=p.raw().getLong("serviceHeartbeatAt",0),silent=System.currentTimeMillis()-beat;
             if(beat<=0||silent>AlarmScheduler.WATCHDOG_MINUTES*60000L){
                 // send() logs its own failure if the system refuses a background restart.
@@ -23,6 +28,9 @@ public class ActionReceiver extends BroadcastReceiver {
         }
         if(AlarmScheduler.KEEPALIVE.equals(action)){
             if(!p.enabled())return;
+            // The chain is cancelled with the watch itself when the schedule closes: re-arming it
+            // would keep waking the device to ask for a service that must stay parked.
+            if(!p.watchingNow()){AlarmScheduler.cancel(context,AlarmScheduler.KEEPALIVE);return;}
             // Re-arm first: a refused background start must not break the chain, or the watch
             // would stay silent until the fifteen-minute watchdog happened to notice.
             AlarmScheduler.keepAlive(context);

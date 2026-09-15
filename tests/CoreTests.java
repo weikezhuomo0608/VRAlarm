@@ -19,6 +19,12 @@ public class CoreTests {
         check(TimeRules.contains(at("2026-09-07T09:00:00"),true,Collections.emptyList(),ZoneId.of("UTC")),"all day ignores empty list");
         check(inside("2026-09-07T05:30:00",night,w(300,600,127)),"overlap union");
         check(!inside("2026-09-07T02:00:00",new TimeRules.Window("off","off",0,0,127,false)),"disabled interval");
+        // hasWindow separates "between two windows" (parked for a while) from "custom mode with
+        // nothing switched on" (parked until the user acts): both stop every detection, but only
+        // the second one is a mistake the page has to shout about.
+        check(TimeRules.hasWindow(Arrays.asList(night)),"an enabled rule counts as a schedule");
+        check(!TimeRules.hasWindow(Arrays.asList(new TimeRules.Window("off","off",0,0,127,false))),"a switched-off rule does not");
+        check(!TimeRules.hasWindow(Collections.emptyList()),"no rules at all is not a schedule");
         long next=TimeRules.nextBoundary(at("2026-09-07T06:00:00"),false,Arrays.asList(night),ZoneId.of("Asia/Shanghai"));check(next==at("2026-09-08T01:00:00"),"next day boundary");
         check(TimeRules.nextBoundary(at("2026-09-08T06:00:00"),false,Arrays.asList(monday),ZoneId.of("Asia/Shanghai"))==at("2026-09-14T23:00:00"),"next week boundary");
         check(TimeRules.nextBoundary(at("2026-09-07T00:00:00"),true,Arrays.asList(night),ZoneId.of("UTC"))==0,"no alarm for all-day");

@@ -37,10 +37,17 @@ public final class AlarmScheduler {
         Intent i=new Intent(c,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return PendingIntent.getActivity(c,0,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
     }
+    /**
+     * The next moment the watch has to change state: a window opening (start watching) or closing
+     * (park). That decision now governs whether any monitoring happens at all, so the wake-up has
+     * to be punctual — under Doze an ordinary allow-while-idle alarm is pushed to about nine
+     * minutes, which would resume the watch nine minutes into a window, or leave it polling nine
+     * minutes past one. Hence the alarm-clock wake-up continuous mode already pays for.
+     */
     public static void boundaries(Context context){
         Prefs p=new Prefs(context);cancel(context,BOUNDARY);if(!p.enabled())return;JSONObject c=p.config();
         long next=TimeRules.nextBoundary(System.currentTimeMillis(),c.optBoolean("allDay"),p.windows(c),TimeRules.zone(c.optString("timezone")));
-        if(next>0)at(context,BOUNDARY,next);
+        if(next>0)atDozeProof(context,BOUNDARY,next);
     }
     /**
      * Periodic revival. An all-day watch has no window boundary to rely on, so without this a
@@ -66,7 +73,10 @@ public final class AlarmScheduler {
         at(context,PRESTREAM,startAt-PollPlan.PRESTREAM_LEAD_MILLIS);
     }
     public static void keepAlive(Context context){
-        Prefs p=new Prefs(context);cancel(context,KEEPALIVE);if(!p.enabled())return;
+        Prefs p=new Prefs(context);cancel(context,KEEPALIVE);
+        // Arming a net for a watch that is parked outside its schedule would only keep waking the
+        // device to do nothing; the boundary alarm is what brings the watch back.
+        if(!p.enabled()||!p.watchingNow())return;
         long now=System.currentTimeMillis();JSONObject c=p.config();
         boolean continuous=c.optBoolean("turbo",true);
         int seconds=PollPlan.keepAliveSeconds(c.optInt("pollSeconds",30),p.allowed(now),continuous);

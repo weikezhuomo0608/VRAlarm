@@ -27,6 +27,13 @@ public final class TimeRules {
         }
         return false;
     }
+    /** Does any rule actually say when to watch? Custom mode with every rule switched off (or no
+     *  rule at all) is a configuration mistake rather than "quiet": there is no instant the user
+     *  asked to be watched, so callers must be able to tell it apart from a gap between windows. */
+    public static boolean hasWindow(List<Window> windows) {
+        for(Window w:windows) if(w.enabled) return true;
+        return false;
+    }
     public static long nextBoundary(long now, boolean allDay, List<Window> windows, ZoneId zone) {
         if(allDay) return 0;
         long best=Long.MAX_VALUE;
