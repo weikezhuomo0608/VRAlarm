@@ -53,6 +53,17 @@ public final class AnchorArt {
         return scheduleFile(c,id).delete();
     }
 
+    /**
+     * Cache-busting revision for the stable /schedule/&lt;id&gt;.img address. Replacing the picture
+     * keeps the same file name, so the revision has to come from the file itself: for an unchanged
+     * address the WebView serves the first image it decoded, which is exactly how the background
+     * bug behaved before it got a revision (see the /background/current note in MainActivity).
+     */
+    public static String scheduleImageRevision(Context c,String id){
+        File f=scheduleImage(c,id);
+        return f==null?"0":Integer.toHexString((f.length()+"@"+f.lastModified()).hashCode());
+    }
+
     public static File existing(Context c,String id){
         if(!Anchors.validId(id))return null;
         File f=file(c,id);

@@ -19,6 +19,13 @@ const server = http.createServer((req, res) => {
         res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
         return;
     }
+    // The pet art ships inside assets/pet/; the real app serves it from its
+    // /assets/ route, so the harness has to serve it too or the picker shows broken images.
+    if (name.startsWith('pet/') && name.endsWith('.png') && !name.includes('..')) {
+        res.setHeader('Content-Type', 'image/png');
+        res.end(fs.readFileSync(path.join(assets, name)));
+        return;
+    }
     if (!['index.html', 'alarm.html', 'app.js', 'style.css', 'hazel.png'].includes(name)) {
         res.writeHead(404); res.end(); return;
     }
@@ -32,6 +39,7 @@ function installMock() {
         config: { soundWithoutNotifications: false, allDay: true, timezone: 'device', catchUp: false, pollSeconds: 30,
             reliable: true, boot: true, ringtone: 'starlight', customName: '未选择', volume: 85, aiOcr: true, aiKey: 'sk-test', aiModel: 'deepseek-flash', preStream: true, ringQueue: false,
             seedColor: '', amoled: false, hideRecents: false, recovery: true, turbo: true, backgroundDim: 40, cardOpacity: 94,
+            pet: true, petCharacter: 'manqu',
             ramp: true, vibrate: true, duration: 60, snoozeMinutes: 5, quietCalls: true, theme: 'light',
             windows: [{ id: 'night', name: '凌晨守候', start: 60, end: 360, days: 127, enabled: true }] },
         enabled: false, running: false, ringing: false, snapshot: {}, networkError: '', serviceError: '', startError: '',
@@ -107,10 +115,22 @@ function installMock() {
         if (action === 'saveScheduleText') { mock.lastScheduleText = patch; setTimeout(() => reply(id, true), 0); return; }
         if (action === 'getSchedule') {
             const a = state.anchors.find(x => x.id === patch.id);
-            setTimeout(() => reply(id, { entries: a ? clone(a.schedule || []) : [], text: mock.scheduleTexts && mock.scheduleTexts[patch.id] || '', hasImage: !!(a && a.scheduleImage) }), 0); return;
+            setTimeout(() => reply(id, { entries: a ? clone(a.schedule || []) : [], text: mock.scheduleTexts && mock.scheduleTexts[patch.id] || '', hasImage: !!(a && a.scheduleImage), imageRevision: a && a.scheduleImageRevision || '0' }), 0); return;
         }
-        if (action === 'pickScheduleImage') { mock.lastPickImage = patch.id; setTimeout(() => reply(id, true), 0); return; }
-        if (action === 'removeScheduleImage') { mock.lastRemoveImage = patch.id; setTimeout(() => reply(id, true), 0); return; }
+        // Storing a picture keeps its address, so the native side hands back a new revision on
+        // every replacement — the mock mirrors that by counting replacements.
+        if (action === 'pickScheduleImage') {
+            mock.lastPickImage = patch.id; mock.imageReplacements = (mock.imageReplacements || 1) + 1;
+            const a = state.anchors.find(x => x.id === patch.id);
+            if (a) { a.scheduleImage = true; a.scheduleImageRevision = 'r' + mock.imageReplacements; }
+            setTimeout(() => reply(id, true), 0); return;
+        }
+        if (action === 'removeScheduleImage') {
+            mock.lastRemoveImage = patch.id;
+            const a = state.anchors.find(x => x.id === patch.id);
+            if (a) { a.scheduleImage = false; a.scheduleImageRevision = '0'; }
+            setTimeout(() => reply(id, true), 0); return;
+        }
         if (action === 'ocrScheduleImage') { mock.lastOcr = patch;
             const now = new Date();
             const md = (now.getMonth()+1)+'/'+now.getDate();
@@ -139,6 +159,7 @@ function installMock() {
         if (action === 'test') { state.ringing=true;state.alarmTest=true;state.alarmUntil=Date.now()+60000; }
         if (action === 'testLater') state.testAt=Date.now()+15000;
         if (action === 'dismiss') state.ringing=false;
+        if (action === 'openLive') (mock.opened || (mock.opened = [])).push(patch.id);
         if (action === 'cancelTest') state.testAt=0;
         if (action === 'permission') mock.lastPermission = patch.kind;
         if (action === 'exportNotificationReport') mock.lastReportOptions = patch;
@@ -646,12 +667,25 @@ function installMock() {
             });
             await test('the week page is a tab that groups entries by day with live state', async () => {
                 await reset();
+                await page.evaluate(async () => {
+                    // The mock's entry sits on Friday 20:00; pin the clock to that Friday morning so
+                    // the row is today's but has not begun, whatever moment the suite runs at.
+                    // Friday is index 4 on the Monday-first scale the schedule bitmask uses.
+                    const friday = new Date(); friday.setHours(10, 0, 0, 0);
+                    friday.setDate(friday.getDate() + ((4 - ((friday.getDay() + 6) % 7)) + 7) % 7);
+                    __mock.state.now = friday.getTime();
+                    await window.refreshNative(true);
+                });
                 await page.locator('[data-route="week"]').last().click();
                 const copy = await page.locator('#content').innerText();
                 assert.match(copy, /WEEKLY TIMELINE/);
                 assert.match(copy, /游戏/);
                 assert.match(copy, /20:00 – 21:00/);
-                assert.match(copy, /正在直播/);
+                assert.match(copy, /今天/);
+                // The broadcaster is live, but Friday 20:00 has not begun at 10:00, so the row must
+                // stay 计划开播: the live flag alone used to paint the whole week as 直播中.
+                assert.match(copy, /计划开播/);
+                assert.doesNotMatch(copy, /正在直播/);
                 assert.doesNotMatch(copy, /周表图片/);
             });
             await test('week rows keep the state label, name and time on a single line', async () => {
@@ -677,6 +711,62 @@ function installMock() {
                 // The layout must not fall back to the shared .row / .live-info styles.
                 assert.equal(await page.locator('.sched-card .live-info').count(), 0);
                 assert.equal(await page.locator('.sched-card .sched-head').count(), 1);
+            });
+            // Which arrangement may read 直播中 depends on the clock, so these pin the clock the
+            // page reads (state.now) instead of trusting the machine's: the weekday offsets below
+            // are resolved in this process, which shares the browser's local zone.
+            const dayOffset = offset => (((new Date().getDay() + 6) % 7) + offset) % 7;
+            const presetWeek = async clock => {
+                await reset();
+                await page.evaluate(async patch => {
+                    const at = new Date(); at.setHours(patch.hour, patch.minute, 0, 0);
+                    const s = __mock.state;
+                    s.now = at.getTime();
+                    s.anchors[0].enabled = true;
+                    // checkedAt stays real so the home page's freshness check is unaffected.
+                    s.anchors[0].snapshot = { status: 1, start: at.getTime() - 3600000, checkedAt: Date.now(), title: '画画中' };
+                    s.anchors[0].schedule = patch.entries.map((e, i) => ({ id: 'w' + i, days: 1 << e.day, start: e.start, end: e.end, note: e.note }));
+                    await window.refreshNative(true);
+                }, clock);
+                await page.locator('[data-route="week"]').last().click();
+                return page.evaluate(() => [...document.querySelectorAll('.sched-card')].map(card => ({
+                    state: (card.querySelector('.sched-state') || { innerText: '' }).innerText.trim(),
+                    note: (card.querySelector('.sched-note') || { innerText: '' }).innerText.trim()
+                })));
+            };
+            await test('only the arrangement already begun is 直播中 on the week page', async () => {
+                const rows = await presetWeek({ hour: 20, minute: 30, entries: [
+                    { day: dayOffset(0), start: 1200, end: 1260, note: '今晚这场' },
+                    { day: dayOffset(0), start: 1320, end: 1380, note: '今天晚些' },
+                    { day: dayOffset(2), start: 1200, end: 1260, note: '别的日子' }
+                ] });
+                const live = rows.filter(r => r.state === '正在直播');
+                // 20:30 sits inside the first arrangement only; the later one today and the one
+                // two days out must stay 计划开播 even though the broadcaster is live.
+                assert.equal(live.length, 1, `one row on air, got ${JSON.stringify(rows)}`);
+                assert.equal(live[0].note, '今晚这场');
+                assert.equal(rows.filter(r => r.state === '计划开播').length, 2);
+            });
+            await test('a planned start inside the coming half hour counts as the session on air', async () => {
+                const rows = await presetWeek({ hour: 19, minute: 45, entries: [
+                    { day: dayOffset(0), start: 1200, end: 1260, note: '今晚这场' },
+                    { day: dayOffset(0), start: 1320, end: 1380, note: '今天晚些' }
+                ] });
+                const live = rows.filter(r => r.state === '正在直播');
+                // Fifteen minutes early: the stream is already live, so the 20:00 arrangement is
+                // the one that can be on air — the 22:00 one is not.
+                assert.equal(live.length, 1, `one row on air, got ${JSON.stringify(rows)}`);
+                assert.equal(live[0].note, '今晚这场');
+            });
+            await test('a live broadcaster with nothing begun today shows no 直播中 row', async () => {
+                const rows = await presetWeek({ hour: 10, minute: 0, entries: [
+                    { day: dayOffset(0), start: 1200, end: 1260, note: '今晚这场' }
+                ] });
+                assert.equal(rows.filter(r => r.state === '正在直播').length, 0);
+                assert.equal(rows.filter(r => r.state === '计划开播').length, 1);
+                // The stream itself is still reported, on the page that reports streams.
+                await page.locator('[data-route="home"]').last().click();
+                assert.match(await page.locator('#content').innerText(), /正在直播/);
             });
             await test('the schedule editor parses pasted text into confirmed entries', async () => {
                 await reset('anchors');
@@ -716,7 +806,7 @@ function installMock() {
                 assert.match(await page.locator('#content').innerText(), /周表图片/);
                 await page.locator('[data-action="viewScheduleImage"]').click();
                 const src = await page.locator('#modal .sched-img img').getAttribute('src');
-                assert.equal(src, '/schedule/hazel.img');
+                assert.equal(src, '/schedule/hazel.img?v=0');
                 await page.waitForFunction(() => { const i = document.querySelector('#modal .sched-img img'); return i && i.complete && i.naturalWidth > 0; });
                 await page.locator('#modal [data-action="closeModal"]').last().click();
                 await page.locator('[data-route="anchors"]').last().click();
@@ -819,8 +909,26 @@ function installMock() {
                 assert.equal(await page.evaluate(() => __mock.lastPickImage), 'hazel');
                 assert.equal(await page.evaluate(() => scheduleDraft.hasImage), true);
                 const src = await page.locator('#modal .sched-img img').getAttribute('src');
-                assert.equal(src, '/schedule/hazel.img');
+                assert.match(src, /^\/schedule\/hazel\.img\?v=/);
                 assert.match(await page.locator('#schedule-editor').innerText(), /周表图片对照/);
+            });
+            await test('replacing the schedule picture changes its address so the new picture loads', async () => {
+                await reset('anchors');
+                await page.evaluate(async () => {
+                    __mock.state.anchors[0].scheduleImage = true;
+                    __mock.state.anchors[0].scheduleImageRevision = 'r1';
+                    await window.refreshNative(true);
+                });
+                await page.locator('[data-anchor-schedule="hazel"]').click();
+                const first = await page.locator('#modal .sched-img img').getAttribute('src');
+                assert.equal(first, '/schedule/hazel.img?v=r1');
+                await page.locator('[data-action="pickScheduleImage"]').click(); await settle();
+                const second = await page.locator('#modal .sched-img img').getAttribute('src');
+                // The stored picture keeps one address per anchor, so a replaced one has to be asked
+                // for under a fresh revision — otherwise the WebView keeps serving the first decode,
+                // which is how a wrong picture "stuck" after the user re-uploaded a correct one.
+                assert.notEqual(first, second);
+                assert.match(second, /\?v=r2/);
             });
             await test('the bulk avatar refresh asks once and reports the count', async () => {
                 await reset('anchors');
@@ -887,6 +995,210 @@ function installMock() {
                 assert.equal(await page.evaluate(() => __mock.state.config.turbo), true);
                 await page.locator('[data-toggle="turbo"]').click(); await settle();
                 assert.equal(await page.evaluate(() => __mock.state.config.turbo), false);
+            });
+            await test('the live button unfolds a picker and a row opens that room', async () => {
+                await reset();
+                await page.evaluate(async () => {
+                    const snap = (status, title) => ({ status, checkedAt: Date.now(), title });
+                    __mock.state.anchors = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({
+                        id: 'a' + n, name: '主播' + n, uid: 100 + n, room: 200 + n, enabled: true, avatar: false, alarm: true,
+                        schedule: [], snapshot: snap(n <= 3 ? 1 : 0, n <= 3 ? '第 ' + n + ' 场直播' : ''),
+                    }));
+                    __mock.opened = [];
+                    await window.refreshNative(true);
+                });
+                assert.equal(await page.locator('#live-picker').count(), 0, 'the picker starts folded');
+                await page.locator('[data-action="openLive"]').click(); await settle();
+                assert.equal(await page.locator('#live-picker').count(), 1, 'stage one unfolds stage two');
+                assert.equal(await page.locator('[data-action="openLive"]').getAttribute('aria-expanded'), 'true');
+                const names = await page.locator('.live-picker-row strong').allTextContents();
+                assert.deepEqual(names.slice(0, 3), ['主播1', '主播2', '主播3'], 'the live anchors come first');
+                assert.equal(names.length, 8, 'every enabled anchor stays reachable');
+                assert.match(await page.locator('#live-picker').innerText(), /第 1 场直播/);
+                // A long roster scrolls inside the panel instead of stretching the page.
+                const list = await page.evaluate(() => {
+                    const el = document.querySelector('.live-picker-list');
+                    const box = el.getBoundingClientRect();
+                    return { scrolls: el.scrollHeight > el.clientHeight, height: Math.round(box.height),
+                             pageHeight: document.documentElement.scrollHeight };
+                });
+                assert.equal(list.scrolls, true, 'the list must scroll by itself');
+                assert.ok(list.height <= 220, `the list should stay capped, got ${list.height}px`);
+                await page.locator('.live-picker-row').first().click(); await settle();
+                assert.deepEqual(await page.evaluate(() => __mock.opened), ['a1'], 'the row opens that anchor');
+                assert.equal(await page.locator('#live-picker').count(), 0, 'choosing folds the panel again');
+                // Stage one toggles shut as well.
+                await page.locator('[data-action="openLive"]').click(); await settle();
+                assert.equal(await page.locator('#live-picker').count(), 1);
+                await page.locator('[data-action="openLive"]').click(); await settle();
+                assert.equal(await page.locator('#live-picker').count(), 0);
+            });
+            await test('the ringing page opens the named room in one tap', async () => {
+                // The alarm page is its own document, so this scenario navigates straight to it
+                // instead of using reset(), which waits for the home page's navigation bar.
+                await page.goto(`http://127.0.0.1:${server.address().port}/alarm.html`);
+                await page.waitForFunction(() => typeof window.refreshNative === 'function');
+                const ringing = async anchorId => page.evaluate(async id => {
+                    __mock.opened = [];
+                    Object.assign(__mock.state, {
+                        ringing: true, alarmTest: false, alarmAnchorId: id, alarmAnchor: '灰泽满 Hazel',
+                        alarmTitle: '画画中', alarmUntil: Date.now() + 60000,
+                    });
+                    await window.refreshNative(true);
+                }, anchorId);
+                await ringing('hazel');
+                const primary = page.locator('.alarm-actions .primary');
+                assert.equal(await primary.getAttribute('data-action'), 'openLive');
+                assert.equal(await primary.getAttribute('data-anchor'), 'hazel');
+                await primary.click(); await settle();
+                // One tap has to reach the native side, which stops the ring, opens the room and
+                // closes this page. It used to unfold the home page's picker and do nothing at all.
+                assert.deepEqual(await page.evaluate(() => __mock.opened), ['hazel'], 'the room is asked for');
+                assert.equal(await page.locator('#live-picker').count(), 0, 'the picker belongs to the home page');
+                assert.match(await page.locator('#alarm-root h1').innerText(), /开播啦/, 'still ringing until the native side answers');
+                // Tapping again must work too: the first tap must not consume the button or fold
+                // some panel instead of opening the room.
+                await primary.click(); await settle();
+                assert.deepEqual(await page.evaluate(() => __mock.opened), ['hazel', 'hazel'], 'a second tap still opens the room');
+                // An empty anchor id still has to reach the native side, which then falls back to
+                // the first anchor — the old code fell silent in exactly this case as well.
+                await ringing('');
+                await primary.click(); await settle();
+                assert.deepEqual(await page.evaluate(() => __mock.opened), [''], 'an empty id still reaches the bridge');
+            });
+            await test('the pet walks above the navigation without stealing taps', async () => {
+                await reset();
+                const first = await page.evaluate(() => document.getElementById('pet').style.transform);
+                await page.waitForTimeout(1200);
+                const second = await page.evaluate(() => document.getElementById('pet').style.transform);
+                assert.notEqual(first, second, 'the pet should visibly move while the page is visible');
+                const geo = await page.evaluate(() => {
+                    const el = document.getElementById('pet');
+                    const box = el.getBoundingClientRect();
+                    const nav = document.getElementById('nav');
+                    const navBox = nav.getBoundingClientRect();
+                    const cxp = Math.round((box.left + box.right) / 2);
+                    const cyp = Math.round((box.top + box.bottom) / 2);
+                    const hit = document.elementFromPoint(cxp, cyp);
+                    // Measured against the control row, not the bar's outer edge: the feet sink
+                    // a few pixels behind that edge on purpose (see the lane check below).
+                    const controls = [...nav.querySelectorAll('button')].map(b => b.getBoundingClientRect().top);
+                    return {
+                        hidden: el.hidden,
+                        lane: document.body.classList.contains('has-pet'),
+                        pointerEvents: getComputedStyle(el).pointerEvents,
+                        coversControls: box.bottom > Math.min(...controls),
+                        navTop: Math.round(navBox.top),
+                        petBottom: Math.round(box.bottom),
+                        passesThrough: !el.contains(hit),
+                    };
+                });
+                assert.equal(geo.hidden, false, 'the pet is on by default');
+                assert.equal(geo.lane, true, 'enabling the pet reserves its lane');
+                // Click-through is the whole safety story: a sweeping fixed element must never
+                // swallow a tap meant for a card, and it must clear the navigation bar's controls.
+                assert.equal(geo.pointerEvents, 'none');
+                assert.equal(geo.passesThrough, true);
+                assert.equal(geo.coversControls, false, `the pet must not cover the bar's buttons, pet bottom ${geo.petBottom} vs bar top ${geo.navTop}`);
+                // The reserved lane must meet the content: the last card used to float a
+                // few millimetres above the pet's head.
+                const lane = await page.evaluate(async () => {
+                    window.scrollTo(0, document.documentElement.scrollHeight);
+                    await new Promise(r => setTimeout(r, 300));
+                    const cards = [...document.querySelectorAll('#content > *')];
+                    const last = cards[cards.length - 1].getBoundingClientRect();
+                    const box = document.getElementById('pet').getBoundingClientRect();
+                    return { gap: Math.round(box.top - last.bottom), nav: Math.round(document.getElementById('nav').getBoundingClientRect().top - box.bottom) };
+                });
+                assert.ok(lane.gap >= 0 && lane.gap <= 4, `the lane should hug the last card, gap was ${lane.gap}px`);
+                // The feet sink a few pixels behind the bar (it paints above the pet), because a
+                // gap of even two pixels, with the shadow hidden behind the bar, read as floating.
+                assert.ok(lane.nav >= -6 && lane.nav <= 0, `the pet should stand on the navigation bar, overlap was ${lane.nav}px`);
+            });
+            await test('the pet walks mirrored and turns back at the end', async () => {
+                await reset();
+                // The drawing is asymmetric, so walking right means walking mirrored.
+                const right = await page.evaluate(() => {
+                    pet.dir = 1; facePet();
+                    return { flip: document.getElementById('pet').classList.contains('flip'),
+                             transform: getComputedStyle(document.getElementById('pet-rig')).transform };
+                });
+                assert.equal(right.flip, true, 'walking right, the sprite is mirrored');
+                assert.match(right.transform, /^matrix\(-1,/, `the mirror must actually render, got ${right.transform}`);
+                const left = await page.evaluate(() => {
+                    pet.dir = -1; facePet();
+                    return { flip: document.getElementById('pet').classList.contains('flip'),
+                             transform: getComputedStyle(document.getElementById('pet-rig')).transform };
+                });
+                assert.equal(left.flip, false, 'walking left, the sprite is itself again');
+                assert.ok(!/^matrix\(-1,/.test(left.transform), `nothing mirrored, got ${left.transform}`);
+                // The live loop has to keep the two in step while it actually walks.
+                const live = await page.evaluate(async () => {
+                    pet.x = 0; pet.dir = 1; pet.wait = 0; pet.phase = 0; facePet(); placePet();
+                    await new Promise(r => setTimeout(r, 700));
+                    return { x: pet.x, dir: pet.dir,
+                             flip: document.getElementById('pet').classList.contains('flip'),
+                             head: document.getElementById('pet-head').style.transform };
+                });
+                assert.ok(live.x > 0, `the pet should have moved right, x was ${live.x}`);
+                assert.equal(live.flip, live.dir > 0, 'facing must follow the walking direction');
+                assert.match(live.head, /rotate\(/, 'the loop keeps posing the head');
+            });
+            await test('both pet sprites are served and the picker stores the choice', async () => {
+                await reset('settings');
+                // 满区 plus the one jelly that is kept.
+                assert.equal(await page.locator('.pet-choice').count(), 2);
+                await page.waitForFunction(() => [...document.querySelectorAll('.pet-choice img')]
+                    .every(i => i.complete && i.naturalWidth > 0));
+                assert.match(await page.locator('[data-action="petHop"]').innerText(), /逗它一下/);
+                // 满区 is the character and the default, so its two layers are the visible ones.
+                assert.equal(await page.evaluate(() => __mock.state.config.petCharacter), 'manqu');
+                const rig = await page.evaluate(() => ({
+                    rig: !document.getElementById('pet-rig').hidden,
+                    art: document.getElementById('pet-art').hidden,
+                    head: document.getElementById('pet-head').complete,
+                    headSrc: document.getElementById('pet-head').getAttribute('src'),
+                    collar: document.getElementById('pet-collar').complete,
+                }));
+                assert.equal(rig.rig, true, 'the head/scarf layers carry 满区');
+                assert.equal(rig.art, true, 'the single-image layer stays out of the way');
+                assert.equal(rig.head, true);
+                assert.equal(rig.collar, true);
+                // A tile must keep its drawing inside it: the taller 满区 art used to spill out.
+                const tiles = await page.evaluate(() => [...document.querySelectorAll('.pet-choice')].map(b => {
+                    const box = b.getBoundingClientRect(), img = b.querySelector('img').getBoundingClientRect();
+                    return { fits: img.width <= box.width + 0.5 && img.height <= box.height + 0.5,
+                             w: Math.round(box.width), h: Math.round(box.height), iw: Math.round(img.width), ih: Math.round(img.height) };
+                }));
+                for (const tile of tiles) assert.ok(tile.fits, `drawing spills out of its ${tile.w}x${tile.h} tile (${tile.iw}x${tile.ih})`);
+                assert.equal(rig.headSrc, 'pet/manqu-head.png', 'the head layer is the head alone, without the scarf');
+                await page.locator('.pet-choice[data-pet="lvdong"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.state.config.petCharacter), 'lvdong');
+                assert.equal(await page.locator('.pet-choice.selected').getAttribute('data-pet'), 'lvdong');
+                const jelly = await page.evaluate(() => ({
+                    rig: !document.getElementById('pet-rig').hidden,
+                    art: document.getElementById('pet-art').hidden,
+                    image: document.getElementById('pet-art').style.backgroundImage,
+                }));
+                assert.equal(jelly.rig, false, 'the jelly is the single-image layer');
+                assert.equal(jelly.art, false);
+                assert.match(jelly.image, /lvdong\.png/);
+                // And back.
+                await page.locator('.pet-choice[data-pet="manqu"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.state.config.petCharacter), 'manqu');
+                assert.equal(await page.locator('.pet-choice.selected').getAttribute('data-pet'), 'manqu');
+            });
+            await test('turning the pet off hides it and gives the reserved space back', async () => {
+                await reset('settings');
+                await page.locator('[data-toggle="pet"]').first().click(); await settle();
+                const off = await page.evaluate(() => ({
+                    hidden: document.getElementById('pet').hidden,
+                    lane: document.body.classList.contains('has-pet'),
+                    stored: __mock.state.config.pet,
+                }));
+                assert.equal(off.stored, false);
+                assert.equal(off.hidden, true);
+                assert.equal(off.lane, false);
             });
             if (output) {
                 fs.mkdirSync(output, { recursive: true });

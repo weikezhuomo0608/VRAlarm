@@ -182,7 +182,7 @@ public class MainActivity extends Activity {
     private String versionName(){
         try{String name=getPackageManager().getPackageInfo(getPackageName(),0).versionName;if(name!=null&&!name.isEmpty())return name;}
         catch(Exception ignored){}
-        return "1.1.6";
+        return "1.1.8";
     }
     private JSONObject permissions(){
         JSONObject p=new JSONObject();NotificationManager n=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
@@ -330,6 +330,7 @@ public class MainActivity extends Activity {
                 Prefs.put(out,"entries",scheduleEntries(prefs.schedule(a.id)));
                 Prefs.put(out,"text",prefs.scheduleText(a.id));
                 Prefs.put(out,"hasImage",AnchorArt.scheduleImage(this,a.id)!=null);
+                Prefs.put(out,"imageRevision",AnchorArt.scheduleImageRevision(this,a.id));
                 return out;
             }
             case "saveSchedule":{
@@ -429,7 +430,7 @@ public class MainActivity extends Activity {
             Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);
             Prefs.put(o,"alarm",x.alarm);
             Prefs.put(o,"snapshot",prefs.snapshot(x.id));Prefs.put(o,"avatar",AnchorArt.existing(this,x.id)!=null);
-            Prefs.put(o,"schedule",scheduleEntries(prefs.schedule(x.id)));Prefs.put(o,"scheduleImage",AnchorArt.scheduleImage(this,x.id)!=null);
+            Prefs.put(o,"schedule",scheduleEntries(prefs.schedule(x.id)));Prefs.put(o,"scheduleImage",AnchorArt.scheduleImage(this,x.id)!=null);Prefs.put(o,"scheduleImageRevision",AnchorArt.scheduleImageRevision(this,x.id));
             Prefs.put(o,"stats",statSummary(x.id));
             all.put(o);
         }

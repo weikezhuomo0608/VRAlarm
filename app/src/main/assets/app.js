@@ -7,8 +7,8 @@ const icon = (name, extra = "") => `<svg class="i ${extra}" viewBox="0 0 24 24" 
 let seq = 0, awaiting = /* @__PURE__ */ new Map(), native = typeof window.HazelNative !== "undefined", route = "home", S = null, configFingerprint = "", busy = false, ruleDraft = null, alarmPainted = false, zoneList = [];
 let compatibilityAction = null, compatibilitySaving = false, anchorDraft = null;
 const WATCH_STALL_MS = 10 * 6e4;
-const defaults = { soundWithoutNotifications: false, allDay: true, timezone: "device", catchUp: false, pollSeconds: 30, reliable: true, boot: true, ringtone: "starlight", customName: "未选择", volume: 85, ramp: true, vibrate: true, duration: 60, snoozeMinutes: 5, quietCalls: true, theme: "light", preStream: true, ringQueue: false, aiOcr: true, aiKey: "", aiModel: "deepseek-flash", seedColor: "", amoled: false, hideRecents: false, recovery: true, turbo: true, backgroundDim: 40, cardOpacity: 94, windows: [{ id: "night", name: "凌晨守候", start: 60, end: 360, days: 127, enabled: true }] };
-const previewState = { config: clone(defaults), enabled: false, running: false, ringing: false, snapshot: {}, anchors: [{ id: "hazel", name: "灰泽满 Hazel", uid: 1298779265, room: 1713546334, enabled: true, avatar: false, snapshot: {} }], networkError: "", serviceError: "", startError: "", inside: true, permissions: { notifications: false, alarmChannel: true, battery: false, fullScreen: false, exact: false, dnd: false, alarmVolume: 4, alarmMax: 7 }, zone: Intl.DateTimeFormat().resolvedOptions().timeZone, deviceZone: Intl.DateTimeFormat().resolvedOptions().timeZone, version: "1.1.6", preview: true, now: Date.now(), snoozeAt: 0, testAt: 0, backgroundName: "", backgroundSet: false, recoveryAt: 0 };
+const defaults = { soundWithoutNotifications: false, allDay: true, timezone: "device", catchUp: false, pollSeconds: 30, reliable: true, boot: true, ringtone: "starlight", customName: "未选择", volume: 85, ramp: true, vibrate: true, duration: 60, snoozeMinutes: 5, quietCalls: true, theme: "light", preStream: true, ringQueue: false, aiOcr: true, aiKey: "", aiModel: "deepseek-flash", seedColor: "", amoled: false, hideRecents: false, recovery: true, turbo: true, backgroundDim: 40, cardOpacity: 94, pet: true, petCharacter: "manqu", windows: [{ id: "night", name: "凌晨守候", start: 60, end: 360, days: 127, enabled: true }] };
+const previewState = { config: clone(defaults), enabled: false, running: false, ringing: false, snapshot: {}, anchors: [{ id: "hazel", name: "灰泽满 Hazel", uid: 1298779265, room: 1713546334, enabled: true, avatar: false, snapshot: {} }], networkError: "", serviceError: "", startError: "", inside: true, permissions: { notifications: false, alarmChannel: true, battery: false, fullScreen: false, exact: false, dnd: false, alarmVolume: 4, alarmMax: 7 }, zone: Intl.DateTimeFormat().resolvedOptions().timeZone, deviceZone: Intl.DateTimeFormat().resolvedOptions().timeZone, version: "1.1.8", preview: true, now: Date.now(), snoozeAt: 0, testAt: 0, backgroundName: "", backgroundSet: false, recoveryAt: 0 };
 if (!native) $("#preview").textContent = "界面预览 · 检测与响铃功能请安装安卓应用体验";
 window.NativeReply = (id, result) => {
   const p = awaiting.get(id);
@@ -162,12 +162,14 @@ function heading(label, title, sub) {
 function render() {
   if (!S) return;
   applyTheme();
+  syncPet();
   if (document.body.classList.contains("alarm-page")) {
     renderAlarm();
     return;
   }
   header();
   navigation();
+  standPet();
   if (route === "home") home();
   if (route === "anchors") anchorsPage();
   if (route === "week") week();
@@ -223,7 +225,7 @@ function compatibilityInfo(next = null) {
 }
 function home() {
   const c = S.config, [liveLabel, liveIcon, isLive] = statusSummary(), n = c.windows.filter((x) => x.enabled).length, p = S.permissions, ready = [p.notifications, p.alarmChannel, p.fullScreen, p.battery, p.exact].filter(Boolean).length;
-  const armed = enabledAnchors(), liveNow = armed.filter((a) => (a.snapshot || {}).status === 1), liveTarget = liveNow[0] || armed[0] || {};
+  const armed = enabledAnchors(), liveNow = armed.filter((a) => (a.snapshot || {}).status === 1);
   const lastCheck = Math.max(0, ...armed.map((a) => (a.snapshot || {}).checkedAt || 0));
   const watchChip = esc(armed.length === 0 ? "尚未选择主播" : armed.length === 1 ? "专属守候 · " + armed[0].name : "守候 " + armed.length + " 位主播");
   const watchTitle = S.enabled ? S.running ? "正在替你守候" : "守候需要恢复" : "准备好，再开始守候";
@@ -243,7 +245,7 @@ function home() {
   if (S.testAt > Date.now()) html += `<div class="card warning"><div class="row"><div class="grow"><h3>锁屏测试已安排</h3><p class="sub">${stamp(S.testAt)} 响铃，现在可以锁屏</p></div><button class="text-button" data-action="cancelTest">取消</button></div></div>`;
   if (S.snoozeAt > 0) html += `<div class="card"><div class="row"><div class="label-icon">${icon("clock")}</div><div class="grow"><h3>稍后再叫你</h3><p class="sub">${stamp(S.snoozeAt)} 再确认本场直播</p></div><button class="text-button" data-action="cancelSnooze">取消</button></div></div>`;
   if (S.networkError || S.serviceError || S.startError) html += `<div class="card warning"><p>${esc(S.serviceError || S.startError || S.networkError)}</p></div>`;
-  html += `<div class="quick-actions"><button class="quick" data-action="testDialog">${icon("sound")}<div><strong>响铃测试</strong><small>听一下，放心等</small></div></button><button class="quick" data-action="openLive" data-anchor="${esc(liveTarget.id || "")}">${icon("external")}<div><strong>打开直播间</strong><small>${liveNow.length ? "正在直播中" : "去守候的直播间看看"}</small></div></button></div>
+  html += `<div class="quick-actions"><button class="quick" data-action="testDialog">${icon("sound")}<div><strong>响铃测试</strong><small>听一下，放心等</small></div></button><button class="quick" data-action="openLive" aria-expanded="${livePickerOpen ? "true" : "false"}" aria-controls="live-picker">${icon("external")}<div class="grow"><strong>打开直播间</strong><small>${livePickerOpen ? "点选一位主播" : liveNow.length ? liveNow.length + " 位正在直播 · 点按选择" : "去守候的直播间看看"}</small></div><span class="caret" aria-hidden="true"></span></button></div>${livePickerOpen ? livePicker() : ""}
     <section class="card ready"><div class="row"><div class="label-icon green">${icon("shield")}</div><div class="grow"><h3>响铃准备度 <span class="muted">${ready} / 5</span></h3><p class="sub">${ready === 5 ? "主要权限已就绪，仍建议做一次锁屏测试" : "检查通知与后台权限，让提醒更可靠"}</p></div><button class="text-button" data-route="settings">去检查 ${icon("arrow")}</button></div></section>
     <p class="footnote">每场直播只自动提醒一次。<br>关机、断网或被系统强制停止时，提醒可能延迟或无法送达。<br>本质AI拼好钟，切勿盲目信任。</p>`;
   $("#content").innerHTML = html;
@@ -438,10 +440,13 @@ async function removeAnchor() {
 }
 let scheduleDraft = null, schedDraftDays = 0, schedDraftStart = 1200, schedDraftEnd = -1;
 const weekDays = ["一", "二", "三", "四", "五", "六", "日"];
+function scheduleImageSrc(id, revision) {
+  return "/schedule/" + id + ".img?v=" + encodeURIComponent(revision || "0");
+}
 function editSchedule(id) {
   const a = (S.anchors || []).find((x) => x.id === id);
   if (!a) return;
-  scheduleDraft = { id, entries: clone(a.schedule || []), text: "", hasImage: !!a.scheduleImage };
+  scheduleDraft = { id, entries: clone(a.schedule || []), text: "", hasImage: !!a.scheduleImage, revision: a.scheduleImageRevision || "" };
   schedDraftDays = 0;
   schedDraftStart = 1200;
   schedDraftEnd = -1;
@@ -456,6 +461,13 @@ function editSchedule(id) {
   }).catch(() => {
   });
 }
+async function refreshSchedulePicture(id) {
+  const info = await api("getSchedule", { id });
+  if (!scheduleDraft || scheduleDraft.id !== id) return;
+  scheduleDraft.hasImage = !!info.hasImage;
+  scheduleDraft.revision = info.imageRevision || "";
+  paintScheduleModal();
+}
 function paintScheduleModal() {
   const box = $("#schedule-editor");
   if (!box || !scheduleDraft) return;
@@ -465,7 +477,7 @@ function paintScheduleModal() {
     const t = time(e.start) + (e.end >= 0 ? " – " + time(e.end) : "");
     return '<div class="sched-row"><div class="grow"><strong>' + t + '</strong><small class="sub">周' + dl + (e.note ? " · " + esc(e.note) : "") + '</small></div><button class="text-button" data-sched-del="' + esc(e.id) + '">删除 ' + icon("close") + "</button></div>";
   }).join("") || '<p class="sub">还没有安排。用下面逐条添加，或粘贴周表文字识别。</p>';
-  box.innerHTML = '<div class="section-label"><h2>已有安排</h2><span style="display:flex;gap:10px;align-items:center"><small>' + scheduleDraft.entries.length + " / 16</small>" + (scheduleDraft.entries.length ? '<button class="text-button" data-action="clearScheduleDraft">清空全部</button>' : "") + "</span></div>" + rows + '<div class="section-label"><h2>添加安排</h2></div><div class="form-label">重复星期</div><div class="weekday-picker">' + weekDays.map((d, i) => '<button data-sched-weekday="' + i + '" class="' + (schedDraftDays & 1 << i ? "selected" : "") + '" aria-pressed="' + !!(schedDraftDays & 1 << i) + '" aria-label="周' + d + '">' + d + "</button>").join("") + '</div><div class="time-inputs" style="margin-top:10px"><label><span class="form-label">开始</span><input class="input" type="time" id="sched-start" value="' + time(schedDraftStart) + '"></label><label><span class="form-label">结束（可空）</span><input class="input" type="time" id="sched-end" value="' + (schedDraftEnd >= 0 ? time(schedDraftEnd) : "") + '"></label></div><input class="input" id="sched-note" maxlength="40" placeholder="备注，例如：杂谈 / 游戏回" style="margin-top:10px"><button class="secondary" data-action="addScheduleEntry" style="margin-top:12px">' + icon("plus") + '添加这条安排</button><div class="section-label"><h2>从文字识别</h2></div><textarea class="input" id="sched-text" rows="4" placeholder="粘贴周表文字，例如：周五 20:00 游戏">' + esc((keepText !== null ? keepText : scheduleDraft.text) || "") + '</textarea><button class="secondary" data-action="parseScheduleText" style="margin-top:10px">' + icon("spark") + '识别为安排</button><p class="hint">识别结果只进上面的列表，保存前可逐条修改；也可以上传周表图片对照。</p>' + (scheduleDraft.hasImage ? '<div class="section-label"><h2>周表图片对照</h2></div><div class="sched-img"><img src="/schedule/' + esc(scheduleDraft.id) + '.img" alt="周表图片"><button class="text-button" data-action="removeScheduleImage" style="margin-top:6px">删除图片 ' + icon("close") + "</button></div>" : "") + '<button class="secondary" data-action="pickScheduleImage" style="margin-top:10px">' + icon("upload") + "上传或更换周表图片</button>" + (scheduleDraft.hasImage ? '<button class="secondary" data-action="ocrSchedule" style="margin-top:10px">' + icon("spark") + "AI 识别图片安排</button>" : "") + '<p class="hint">图片显示在列表上方，方便边看边录；只保存在本机，应用不做图片识别。</p><div class="form-error" id="sched-error"></div>';
+  box.innerHTML = '<div class="section-label"><h2>已有安排</h2><span style="display:flex;gap:10px;align-items:center"><small>' + scheduleDraft.entries.length + " / 16</small>" + (scheduleDraft.entries.length ? '<button class="text-button" data-action="clearScheduleDraft">清空全部</button>' : "") + "</span></div>" + rows + '<div class="section-label"><h2>添加安排</h2></div><div class="form-label">重复星期</div><div class="weekday-picker">' + weekDays.map((d, i) => '<button data-sched-weekday="' + i + '" class="' + (schedDraftDays & 1 << i ? "selected" : "") + '" aria-pressed="' + !!(schedDraftDays & 1 << i) + '" aria-label="周' + d + '">' + d + "</button>").join("") + '</div><div class="time-inputs" style="margin-top:10px"><label><span class="form-label">开始</span><input class="input" type="time" id="sched-start" value="' + time(schedDraftStart) + '"></label><label><span class="form-label">结束（可空）</span><input class="input" type="time" id="sched-end" value="' + (schedDraftEnd >= 0 ? time(schedDraftEnd) : "") + '"></label></div><input class="input" id="sched-note" maxlength="40" placeholder="备注，例如：杂谈 / 游戏回" style="margin-top:10px"><button class="secondary" data-action="addScheduleEntry" style="margin-top:12px">' + icon("plus") + '添加这条安排</button><div class="section-label"><h2>从文字识别</h2></div><textarea class="input" id="sched-text" rows="4" placeholder="粘贴周表文字，例如：周五 20:00 游戏">' + esc((keepText !== null ? keepText : scheduleDraft.text) || "") + '</textarea><button class="secondary" data-action="parseScheduleText" style="margin-top:10px">' + icon("spark") + '识别为安排</button><p class="hint">识别结果只进上面的列表，保存前可逐条修改；也可以上传周表图片对照。</p>' + (scheduleDraft.hasImage ? '<div class="section-label"><h2>周表图片对照</h2></div><div class="sched-img"><img src="' + esc(scheduleImageSrc(scheduleDraft.id, scheduleDraft.revision)) + '" alt="周表图片"><button class="text-button" data-action="removeScheduleImage" style="margin-top:6px">删除图片 ' + icon("close") + "</button></div>" : "") + '<button class="secondary" data-action="pickScheduleImage" style="margin-top:10px">' + icon("upload") + "上传或更换周表图片</button>" + (scheduleDraft.hasImage ? '<button class="secondary" data-action="ocrSchedule" style="margin-top:10px">' + icon("spark") + "AI 识别图片安排</button>" : "") + '<p class="hint">图片显示在列表上方，方便边看边录；只保存在本机，应用不做图片识别。</p><div class="form-error" id="sched-error"></div>';
 }
 function addScheduleEntry() {
   const error = $("#sched-error");
@@ -657,12 +669,29 @@ async function saveScheduleDraft() {
   }
 }
 function viewScheduleImage(id) {
-  openModal("周表图片", '<div class="sched-img"><img src="/schedule/' + esc(id) + '.img" alt="周表图片"></div><p class="hint">图片仅保存在本机，用于查看。</p>', '<div class="sheet-actions"><button class="primary" data-action="closeModal">关闭</button></div>');
+  const a = (S.anchors || []).find((x) => x.id === id) || {};
+  openModal("周表图片", '<div class="sched-img"><img src="' + esc(scheduleImageSrc(id, a.scheduleImageRevision)) + '" alt="周表图片"></div><p class="hint">图片仅保存在本机，用于查看。</p>', '<div class="sheet-actions"><button class="primary" data-action="closeModal">关闭</button></div>');
+}
+const SCHEDULE_SOON_MINUTES = 30;
+function airingToday(rows, today, nowMinutes) {
+  const airing = {}, begun = {};
+  for (const p of rows) {
+    const e = p.e;
+    if (!(e.days & 1 << today) || e.start > nowMinutes + SCHEDULE_SOON_MINUTES) continue;
+    if (begun[p.a.id] === void 0 || e.start > begun[p.a.id]) {
+      begun[p.a.id] = e.start;
+      airing[p.a.id] = e.id;
+    }
+  }
+  return airing;
 }
 function week() {
   const list = S.anchors || [];
-  const today = ((/* @__PURE__ */ new Date()).getDay() + 6) % 7;
+  const now = new Date(S.now || Date.now());
+  const today = (now.getDay() + 6) % 7;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const rows = list.flatMap((a) => (a.schedule || []).map((e) => ({ a, e })));
+  const airing = airingToday(rows, today, nowMinutes);
   let html = heading("WEEKLY TIMELINE", "这一周，谁在等你。", "来自主播周表；是否响铃仍由时段与响铃开关决定。");
   if (!rows.length && !list.some((a) => a.scheduleImage)) html += '<div class="card sched-empty"><div class="row"><div class="label-icon">' + icon("calendar") + '</div><div class="grow"><strong>还没有周表</strong><p class="sub">到“主播”页，在主播卡片上点「周表」添加安排；也可以粘贴周表文字识别，或上传周表图片。</p></div></div><button class="secondary" data-route="anchors">去主播页添加 ' + icon("arrow") + "</button></div>";
   for (let off = 0; off < 7; off++) {
@@ -672,7 +701,7 @@ function week() {
     html += '<div class="section-label"><h2>周' + weekDays[d] + (off === 0 ? " · 今天" : off === 1 ? " · 明天" : "") + "</h2><small>" + dayRows.length + " 场</small></div>";
     html += dayRows.map((pair) => {
       const a = pair.a, e = pair.e;
-      const live = (a.snapshot || {}).status === 1 && a.enabled;
+      const live = a.enabled && (a.snapshot || {}).status === 1 && airing[a.id] === e.id;
       const t = time(e.start) + (e.end >= 0 ? " – " + time(e.end) : "");
       const cov = live && a.snapshot && a.snapshot.cover ? '<img class="sched-cover" src="/cover/?u=' + encodeURIComponent(a.snapshot.cover) + '" alt="">' : "";
       return '<article class="card sched-card ' + (a.enabled ? "" : "disabled-rule") + '"><div class="sched-head">' + anchorArt(a) + '<div class="grow"><div class="anchor-name">' + esc(a.name) + '</div><div class="sched-meta"><span class="dot ' + (live ? "live" : "") + '"></span><span class="sched-state">' + (live ? "正在直播" : "计划开播") + "</span>" + (e.note ? '<span class="sched-note">' + esc(e.note) + "</span>" : "") + '</div></div><div class="sched-side"><strong class="sched-time">' + t + "</strong>" + cov + "</div></div></article>";
@@ -707,7 +736,7 @@ function sound() {
 }
 function settings() {
   const c = S.config, p = S.permissions, rows = [["notifications", "bell", "允许通知", p.notifications ? "系统已允许发送通知" : p.notificationPolicy === "revoked" ? "系统策略拒绝授权，点按查看排查方法" : p.notificationMismatch ? "授权状态尚未一致，请打开系统通知设置检查" : p.notificationRuntime === false ? "请允许系统通知授权，并开启应用通知" : "接收开播提醒与守候状态", p.notifications], ["alarmChannel", "sound", "开播强提醒通道", "请保留横幅与锁屏显示", p.alarmChannel], ["fullScreen", "screen", "全屏提醒", "锁屏时显示可操作的提醒页面", p.fullScreen], ["battery", "battery", "后台电池权限", "允许后台运行，减少检测中断", p.battery], ["exact", "clock", "精确闹钟", "用于时段边界、暂缓与锁屏测试", p.exact], ["accessibility", "shield", "无障碍守候辅助（可选）", p.accessibilityConnected ? "已连接；系统清理本应用后由系统重新拉起并恢复守候" : "不读取屏幕；从最近任务划掉后恢复最快的一条路", p.accessibility], ["dnd", "moon", "勿扰模式", "如使用勿扰，请在系统中允许闹钟", !p.dnd]];
-  let html = heading("A RELIABLE LITTLE WATCH", "把每次提醒，照顾好。", "权限是否允许，由你的手机最终决定。") + `<div class="section-label"><h2>权限检查</h2><small>点按可进入系统设置</small></div><section class="card permissions-card">${rows.map(([key, i, name, desc, ok]) => `<button class="permission-row" data-permission="${key}">${icon(i)}<span class="grow"><strong>${name}</strong><small>${desc}</small></span><span class="badge ${ok ? "" : "warn"}">${key === "dnd" ? ok ? "未开启" : "请检查" : ok ? "已就绪" : key === "notifications" && p.notificationPolicy === "revoked" ? "策略限制" : "去设置"}</span><span class="chevron">›</span></button>`).join("")}</section><div class="permission-actions"><button class="text-button" data-permission="notificationSettings">打开系统通知设置 ${icon("external")}</button><button class="text-button" data-action="recheckPermissions">重新检查 ${icon("refresh")}</button></div><div class="card warning"><p>小米 / Redmi、华为、荣耀、OPPO、vivo 等手机，还可能需要在系统中允许自启动，把后台电池策略设为“不限制”，并在最近任务里长按本应用的卡片将它锁定。无法由应用自动验证。</p><p class="hint" style="margin-top:5px">荣耀 MagicOS：设置 → 应用和服务 → 应用启动管理，找到VR闹钟，关闭“自动管理”后勾选允许自启动、允许关联启动、允许后台活动。</p><button class="text-button" data-permission="app" style="margin-top:5px">打开应用系统设置 ${icon("arrow")}</button></div><div class="section-label"><h2>AI 图片识别（周表）</h2></div><section class="card">${setting("AI 识别周表图片", "上传周表图片后可让 AI 自动提取安排；图片会上传到你配置的 AI 服务商处理，默认开启，可随时关闭。", sw("aiOcr", c.aiOcr !== false, "AI 图片识别"))}<div class="setting-row"><div class="grow"><h3>接口密钥</h3><p class="sub">DeepSeek 兼容接口；仅保存在本机</p></div></div><input class="input" data-setting="aiKey" value="${esc(c.aiKey || "")}" placeholder="sk-…" style="margin-top:6px"><div class="setting-row"><div class="grow"><h3>模型</h3><p class="sub">需要支持图片输入，例如 deepseek-flash</p></div></div><input class="input" data-setting="aiModel" value="${esc(c.aiModel || "deepseek-flash")}" style="margin-top:6px"></section><div class="section-label"><h2>小米与通知兼容</h2></div><section class="card">${setting("通知异常时仍响铃", "通知未获准时，继续按时段检测并播放闹铃。通知栏与锁屏卡片可能不显示。", sw("soundWithoutNotifications", c.soundWithoutNotifications, "通知异常时仍响铃"))}<button class="permission-row" data-permission="overlay">${icon("screen")}<span class="grow"><strong>悬浮关闭按钮 · 可选</strong><small>仅响铃时显示，方便在其他应用上关闭闹铃。</small></span><span class="badge ${p.overlay ? "" : "warn"}">${p.overlay ? "已就绪" : "去设置"}</span></button></section><div class="section-label"><h2>后台守候</h2></div>${watchNoticeCard()}<section class="card">${setting("优先保证提醒", "提醒时段内保持持续检测，更耗电；长时间守候建议接通电源。", sw("reliable", c.reliable, "优先保证提醒"))}${setting("检测间隔", "网络异常会逐步放慢重试；时段外约 3 分钟检查一次。", select("pollSeconds", c.pollSeconds, [[15, "15 秒"], [30, "30 秒"], [60, "60 秒"], [120, "120 秒"]]))}${setting("持续高频守候", "一直按上面的间隔检查：时段外也不放慢，手机休眠时用「闹钟式唤醒」按点叫醒（Doze 会把它推迟到约 9 分钟，之后就不会再推迟）。这是最不容易漏开播的设置；代价是更耗电，状态栏会出现闹钟图标，且需要「精确闹钟」权限。", sw("turbo", c.turbo !== false, "持续高频守候"))}${setting("重启后恢复守候", "仅恢复此前已开启的守候；仍受系统自启动限制。", sw("boot", c.boot, "重启后恢复守候"))}${setting("定时恢复检查", "约每 15 分钟确认守候服务是否还活着，中断时自动拉起；不影响正常检测节奏，系统休眠时可能推迟。", sw("recovery", c.recovery !== false, "定时恢复检查"))}${S.recoveryAt ? `<p class="sub" style="padding:0 4px 10px;margin-top:-8px">已安排恢复检查 · ${stamp(S.recoveryAt)}</p>` : ""}${setting("从最近任务隐藏缩略图", "最近任务卡片里隐藏应用内容，减少误划与窥屏；不影响提醒功能。", sw("hideRecents", c.hideRecents, "隐藏最近任务缩略图"))}</section><div class="section-label"><h2>主题与外观</h2><small>明暗、主题色与背景</small></div><section class="card">${setting("界面主题", "选择舒服的明暗；「跟随系统」会随手机的深色模式实时变化。", select("theme", c.theme, [["light", "奶白"], ["dark", "夜色"], ["system", "跟随系统"]]))}${setting("AMOLED 纯黑模式", "仅「夜色」主题生效：底色改为纯黑。奶白主题下此项不生效。", sw("amoled", c.amoled, "AMOLED 纯黑模式"))}<div class="setting-row"><div class="grow"><h3>主题色</h3><p class="sub">${c.seedColor ? "当前 " + esc(c.seedColor) : "使用内置蓝灰配色"}</p></div></div><div class="swatches">${[["", "#516b82"], ["#A65C83", seedSwatch("#A65C83", c)], ["#6D7DB4", seedSwatch("#6D7DB4", c)], ["#4F7FA4", seedSwatch("#4F7FA4", c)], ["#447A6A", seedSwatch("#447A6A", c)], ["#88743C", seedSwatch("#88743C", c)], ["#B36A46", seedSwatch("#B36A46", c)], ["#9865AB", seedSwatch("#9865AB", c)], ["#B85872", seedSwatch("#B85872", c)], ["#536B81", seedSwatch("#536B81", c)], ["#6D7650", seedSwatch("#6D7650", c)], ["#B2748C", seedSwatch("#B2748C", c)], ["#655C74", seedSwatch("#655C74", c)]].map(([hex, bg]) => `<button class="swatch ${(c.seedColor || "") === hex ? "selected" : ""}" style="background:${bg}" aria-label="主题色 ${hex || "默认"}" data-seed="${hex}">${(c.seedColor || "") === hex ? "✓" : ""}</button>`).join("")}</div><input class="input" data-setting="seedColor" value="${esc(c.seedColor || "")}" placeholder="留空使用默认，或输入 #536B81" style="margin-top:10px"><p class="hint" style="margin:6px 0 0">圆点已按当前主题显示实际生效的颜色。</p></section><div class="section-label"><h2>背景图片</h2><small>只读取你选择的图片，不需要访问整个相册</small></div><section class="card"><div class="setting-row"><div class="grow"><h3>${S.backgroundSet ? "已设置背景" : "还没有设置背景"}</h3><p class="sub">${S.backgroundSet ? esc(S.backgroundName || "自选背景") : "选择一张喜欢的图片作为应用背景"}</p></div></div><div class="bg-actions"><button class="secondary" data-action="pickBackground">${S.backgroundSet ? "更换图片" : "选择图片"}</button>${S.backgroundSet ? '<button class="secondary outline" data-action="removeBackground">移除背景</button>' : ""}</div><div class="slider-row"><div class="grow"><h3>背景遮罩</h3><p class="sub">压暗背景，保证文字可读</p></div><span class="muted">${c.backgroundDim || 0}%</span></div><input aria-label="背景遮罩百分比" class="volume-track" type="range" min="0" max="90" value="${c.backgroundDim || 0}" data-setting="backgroundDim" style="margin:8px 0 2px"><div class="slider-row"><div class="grow"><h3>卡片不透明度</h3><p class="sub">越低透出的背景越多</p></div><span class="muted">${c.cardOpacity || 94}%</span></div><input aria-label="卡片不透明度百分比" class="volume-track" type="range" min="75" max="100" value="${c.cardOpacity || 94}" data-setting="cardOpacity" style="margin:8px 0 2px"><p class="hint" style="margin:8px 0 0">支持 JPG、PNG、WebP，最大 20 MB。图片复制并缩放后只保存在应用内；备份不包含背景图片。</p></section><div class="section-label"><h2>数据与帮助</h2></div><section class="card" style="padding-top:5px;padding-bottom:5px">${[["notificationHelp", "bell", "通知授权帮助"], ["notificationReport", "download", "导出通知排查包"], ["testDialog", "shield", "锁屏与响铃测试"], ["export", "download", "导出设置与诊断记录"], ["import", "upload", "从备份恢复设置"], ["privacy", "info", "隐私与使用说明"]].map(([action, i, label]) => `<button class="plain-row" data-action="${action}">${icon(i)}<span>${label}</span><span class="chevron">›</span></button>`).join("")}</section><p class="footnote">VR闹钟 ${esc(S.version)} · 本机守候 ${enabledAnchors().length} 位主播<br>主播可在“主播”页随时增删或关闭<br>非哔哩哔哩或主播官方应用</p>`;
+  let html = heading("A RELIABLE LITTLE WATCH", "把每次提醒，照顾好。", "权限是否允许，由你的手机最终决定。") + `<div class="section-label"><h2>权限检查</h2><small>点按可进入系统设置</small></div><section class="card permissions-card">${rows.map(([key, i, name, desc, ok]) => `<button class="permission-row" data-permission="${key}">${icon(i)}<span class="grow"><strong>${name}</strong><small>${desc}</small></span><span class="badge ${ok ? "" : "warn"}">${key === "dnd" ? ok ? "未开启" : "请检查" : ok ? "已就绪" : key === "notifications" && p.notificationPolicy === "revoked" ? "策略限制" : "去设置"}</span><span class="chevron">›</span></button>`).join("")}</section><div class="permission-actions"><button class="text-button" data-permission="notificationSettings">打开系统通知设置 ${icon("external")}</button><button class="text-button" data-action="recheckPermissions">重新检查 ${icon("refresh")}</button></div><div class="card warning"><p>小米 / Redmi、华为、荣耀、OPPO、vivo 等手机，还可能需要在系统中允许自启动，把后台电池策略设为“不限制”，并在最近任务里长按本应用的卡片将它锁定。无法由应用自动验证。</p><p class="hint" style="margin-top:5px">荣耀 MagicOS：设置 → 应用和服务 → 应用启动管理，找到VR闹钟，关闭“自动管理”后勾选允许自启动、允许关联启动、允许后台活动。</p><button class="text-button" data-permission="app" style="margin-top:5px">打开应用系统设置 ${icon("arrow")}</button></div><div class="section-label"><h2>AI 图片识别（周表）</h2></div><section class="card">${setting("AI 识别周表图片", "上传周表图片后可让 AI 自动提取安排；图片会上传到你配置的 AI 服务商处理，默认开启，可随时关闭。", sw("aiOcr", c.aiOcr !== false, "AI 图片识别"))}<div class="setting-row"><div class="grow"><h3>接口密钥</h3><p class="sub">DeepSeek 兼容接口；仅保存在本机</p></div></div><input class="input" data-setting="aiKey" value="${esc(c.aiKey || "")}" placeholder="sk-…" style="margin-top:6px"><div class="setting-row"><div class="grow"><h3>模型</h3><p class="sub">需要支持图片输入，例如 deepseek-flash</p></div></div><input class="input" data-setting="aiModel" value="${esc(c.aiModel || "deepseek-flash")}" style="margin-top:6px"></section><div class="section-label"><h2>小米与通知兼容</h2></div><section class="card">${setting("通知异常时仍响铃", "通知未获准时，继续按时段检测并播放闹铃。通知栏与锁屏卡片可能不显示。", sw("soundWithoutNotifications", c.soundWithoutNotifications, "通知异常时仍响铃"))}<button class="permission-row" data-permission="overlay">${icon("screen")}<span class="grow"><strong>悬浮关闭按钮 · 可选</strong><small>仅响铃时显示，方便在其他应用上关闭闹铃。</small></span><span class="badge ${p.overlay ? "" : "warn"}">${p.overlay ? "已就绪" : "去设置"}</span></button></section><div class="section-label"><h2>后台守候</h2></div>${watchNoticeCard()}<section class="card">${setting("优先保证提醒", "提醒时段内保持持续检测，更耗电；长时间守候建议接通电源。", sw("reliable", c.reliable, "优先保证提醒"))}${setting("检测间隔", "网络异常会逐步放慢重试；时段外约 3 分钟检查一次。", select("pollSeconds", c.pollSeconds, [[15, "15 秒"], [30, "30 秒"], [60, "60 秒"], [120, "120 秒"]]))}${setting("持续高频守候", "一直按上面的间隔检查：时段外也不放慢，手机休眠时用「闹钟式唤醒」按点叫醒（Doze 会把它推迟到约 9 分钟，之后就不会再推迟）。这是最不容易漏开播的设置；代价是更耗电，状态栏会出现闹钟图标，且需要「精确闹钟」权限。", sw("turbo", c.turbo !== false, "持续高频守候"))}${setting("重启后恢复守候", "仅恢复此前已开启的守候；仍受系统自启动限制。", sw("boot", c.boot, "重启后恢复守候"))}${setting("定时恢复检查", "约每 15 分钟确认守候服务是否还活着，中断时自动拉起；不影响正常检测节奏，系统休眠时可能推迟。", sw("recovery", c.recovery !== false, "定时恢复检查"))}${S.recoveryAt ? `<p class="sub" style="padding:0 4px 10px;margin-top:-8px">已安排恢复检查 · ${stamp(S.recoveryAt)}</p>` : ""}${setting("从最近任务隐藏缩略图", "最近任务卡片里隐藏应用内容，减少误划与窥屏；不影响提醒功能。", sw("hideRecents", c.hideRecents, "隐藏最近任务缩略图"))}</section><div class="section-label"><h2>主题与外观</h2><small>明暗、主题色与背景</small></div><section class="card">${setting("界面主题", "选择舒服的明暗；「跟随系统」会随手机的深色模式实时变化。", select("theme", c.theme, [["light", "奶白"], ["dark", "夜色"], ["system", "跟随系统"]]))}${setting("AMOLED 纯黑模式", "仅「夜色」主题生效：底色改为纯黑。奶白主题下此项不生效。", sw("amoled", c.amoled, "AMOLED 纯黑模式"))}<div class="setting-row"><div class="grow"><h3>主题色</h3><p class="sub">${c.seedColor ? "当前 " + esc(c.seedColor) : "使用内置蓝灰配色"}</p></div></div><div class="swatches">${[["", "#516b82"], ["#A65C83", seedSwatch("#A65C83", c)], ["#6D7DB4", seedSwatch("#6D7DB4", c)], ["#4F7FA4", seedSwatch("#4F7FA4", c)], ["#447A6A", seedSwatch("#447A6A", c)], ["#88743C", seedSwatch("#88743C", c)], ["#B36A46", seedSwatch("#B36A46", c)], ["#9865AB", seedSwatch("#9865AB", c)], ["#B85872", seedSwatch("#B85872", c)], ["#536B81", seedSwatch("#536B81", c)], ["#6D7650", seedSwatch("#6D7650", c)], ["#B2748C", seedSwatch("#B2748C", c)], ["#655C74", seedSwatch("#655C74", c)]].map(([hex, bg]) => `<button class="swatch ${(c.seedColor || "") === hex ? "selected" : ""}" style="background:${bg}" aria-label="主题色 ${hex || "默认"}" data-seed="${hex}">${(c.seedColor || "") === hex ? "✓" : ""}</button>`).join("")}</div><input class="input" data-setting="seedColor" value="${esc(c.seedColor || "")}" placeholder="留空使用默认，或输入 #536B81" style="margin-top:10px"><p class="hint" style="margin:6px 0 0">圆点已按当前主题显示实际生效的颜色。</p></section>${petSection()}<div class="section-label"><h2>背景图片</h2><small>只读取你选择的图片，不需要访问整个相册</small></div><section class="card"><div class="setting-row"><div class="grow"><h3>${S.backgroundSet ? "已设置背景" : "还没有设置背景"}</h3><p class="sub">${S.backgroundSet ? esc(S.backgroundName || "自选背景") : "选择一张喜欢的图片作为应用背景"}</p></div></div><div class="bg-actions"><button class="secondary" data-action="pickBackground">${S.backgroundSet ? "更换图片" : "选择图片"}</button>${S.backgroundSet ? '<button class="secondary outline" data-action="removeBackground">移除背景</button>' : ""}</div><div class="slider-row"><div class="grow"><h3>背景遮罩</h3><p class="sub">压暗背景，保证文字可读</p></div><span class="muted">${c.backgroundDim || 0}%</span></div><input aria-label="背景遮罩百分比" class="volume-track" type="range" min="0" max="90" value="${c.backgroundDim || 0}" data-setting="backgroundDim" style="margin:8px 0 2px"><div class="slider-row"><div class="grow"><h3>卡片不透明度</h3><p class="sub">越低透出的背景越多</p></div><span class="muted">${c.cardOpacity || 94}%</span></div><input aria-label="卡片不透明度百分比" class="volume-track" type="range" min="75" max="100" value="${c.cardOpacity || 94}" data-setting="cardOpacity" style="margin:8px 0 2px"><p class="hint" style="margin:8px 0 0">支持 JPG、PNG、WebP，最大 20 MB。图片复制并缩放后只保存在应用内；备份不包含背景图片。</p></section><div class="section-label"><h2>数据与帮助</h2></div><section class="card" style="padding-top:5px;padding-bottom:5px">${[["notificationHelp", "bell", "通知授权帮助"], ["notificationReport", "download", "导出通知排查包"], ["testDialog", "shield", "锁屏与响铃测试"], ["export", "download", "导出设置与诊断记录"], ["import", "upload", "从备份恢复设置"], ["privacy", "info", "隐私与使用说明"]].map(([action, i, label]) => `<button class="plain-row" data-action="${action}">${icon(i)}<span>${label}</span><span class="chevron">›</span></button>`).join("")}</section><p class="footnote">VR闹钟 ${esc(S.version)} · 本机守候 ${enabledAnchors().length} 位主播<br>主播可在“主播”页随时增删或关闭<br>非哔哩哔哩或主播官方应用</p>`;
   if (p.powerSave) html = `<div class="card warning"><p>手机当前处于省电模式，后台提醒可能延迟。</p></div>` + html;
   $("#content").innerHTML = html;
 }
@@ -800,7 +829,44 @@ function testDialog() {
 function privacy() {
   openModal("隐私与使用说明", `<div class="body-copy"><p><strong>只守候你添加的主播。</strong><br>通过 B 站公开接口检测你在“主播”页添加的直播间。仅“正在直播”触发开播提醒，轮播不会触发。不需要登录，不读取 Cookie，不访问私信。删除主播后，本机保存的头像与场次记录一并清除。</p><p><strong>数据留在你的手机。</strong><br>设置、铃声、主播列表、缓存的头像和最多 200 条运行记录保存在应用内，无广告、无统计上报。自选背景图片通过系统选择器选取，复制并缩放后保存于应用内部，不需要整册相册权限；备份不包含背景图片。网络请求仅用于连接 B 站公开直播接口（读取直播状态、主播名称与头像）。点击个人空间或直播间时会打开 B 站或浏览器。</p><p><strong>强响铃有明确边界。</strong><br>使用闹钟音量通道、可选振动及全屏通知。应用不会关闭系统勿扰模式，仍需由你在系统中允许闹钟。响铃到期自动停止，同场直播会去重；暂缓提醒是你主动请求的再次提醒。</p><p><strong>通知异常兼容响铃。</strong><br>需你明确开启，通知未获准时仍按所选时段播放闹铃。系统通知权限保持真实状态。悬浮关闭按钮完全可选，仅响铃时显示；可在应用内或系统中随时关闭相关设置。</p><p><strong>无障碍守候辅助。</strong><br>完全可选。只接收本应用自身的窗口变化信号，每约 45 秒检查守候服务；发现中断时请求恢复，失败后限速重试。不读取窗口内容、不执行手势或点击、不监听按键、不截屏。只有你已开启守候时才尝试恢复，不能突破系统强制停止。</p><p><strong>不是云端推送。</strong><br>守候依靠手机后台联网检测。正常情况下延迟约为检测间隔加网络耗时；B 站限制、接口改变、断网、系统休眠或强行停止都可能造成延迟或漏报。关闭“优先保证提醒”可降低耗电，但更容易延迟。</p><p><strong>时间按所选时区计算。</strong><br>跨午夜的时段属于开始那天。缺少接口开播时间时按首次检测时间判断；补报开关允许在进入时段后提醒已经开始的直播。</p><p><strong>文件备份。</strong><br>导出含设置、主播列表、状态和运行记录，不包含自选铃声与已缓存头像本身。恢复时会一并替换时段、声音设置和主播列表，不自动开始守候。卸载会删除本地设置与铃声，请先备份。</p><p>图标使用你提供的图片。应用为个人使用制作，与哔哩哔哩及主播无官方关联。</p></div>`);
 }
+let livePickerOpen = false;
+function livePicker() {
+  const armed = enabledAnchors();
+  const live = armed.filter((a) => (a.snapshot || {}).status === 1), rest = armed.filter((a) => (a.snapshot || {}).status !== 1);
+  const row = (a) => {
+    const s = a.snapshot || {};
+    return `<button class="live-picker-row" data-anchor-open="${esc(a.id)}">${anchorArt(a)}<span class="grow"><strong>${esc(a.name)}</strong><small>${esc(s.status === 1 ? s.title || "正在直播" : "暂未开播")}</small></span><span class="chevron">›</span></button>`;
+  };
+  const head = live.length ? `<span class="dot live"></span>正在直播 ${live.length} 位 · 选择要打开的直播间` : `<span class="dot"></span>当前没有主播在直播 · 选择要打开的直播间`;
+  return `<section class="live-picker" id="live-picker"><div class="live-picker-head">${head}</div><div class="live-picker-list">${live.map(row).join("")}${rest.map(row).join("")}</div></section>`;
+}
+function toggleLivePicker() {
+  if (!enabledAnchors().length) {
+    livePickerOpen = false;
+    toast("还没有启用中的主播");
+    render();
+    return;
+  }
+  livePickerOpen = !livePickerOpen;
+  render();
+  if (livePickerOpen) {
+    const panel = $("#live-picker");
+    if (panel && panel.scrollIntoView) panel.scrollIntoView({ block: "nearest" });
+  }
+}
 async function perform(action, anchorId = "") {
+  if (action === "petHop") {
+    petHop();
+    return;
+  }
+  if (action === "openLive") {
+    if (anchorId || document.body.classList.contains("alarm-page")) {
+      await api("openLive", { id: anchorId });
+      return;
+    }
+    toggleLivePicker();
+    return;
+  }
   if (action === "accessibilityInfo") {
     accessibilityInfo();
     return;
@@ -935,8 +1001,7 @@ async function perform(action, anchorId = "") {
     if (scheduleDraft) {
       try {
         await api("pickScheduleImage", { id: scheduleDraft.id }, 6e4);
-        scheduleDraft.hasImage = true;
-        paintScheduleModal();
+        await refreshSchedulePicture(scheduleDraft.id);
       } catch (e) {
         toast(e.message);
       }
@@ -946,8 +1011,7 @@ async function perform(action, anchorId = "") {
   if (action === "removeScheduleImage") {
     if (scheduleDraft) {
       await api("removeScheduleImage", { id: scheduleDraft.id });
-      scheduleDraft.hasImage = false;
-      paintScheduleModal();
+      await refreshSchedulePicture(scheduleDraft.id);
       toast("图片已删除");
     }
     return;
@@ -1079,7 +1143,9 @@ document.addEventListener("click", async (e) => {
       return;
     }
     if (b.dataset.anchorOpen) {
+      livePickerOpen = false;
       await api("openLive", { id: b.dataset.anchorOpen });
+      if (route === "home") render();
       return;
     }
     if (b.dataset.anchorProfile) {
@@ -1110,6 +1176,10 @@ document.addEventListener("click", async (e) => {
     }
     if (b.dataset.seed !== void 0) {
       await save({ seedColor: b.dataset.seed });
+      return;
+    }
+    if (b.dataset.pet) {
+      await save({ petCharacter: b.dataset.pet });
       return;
     }
     if (b.dataset.schedDel) {
@@ -1262,14 +1332,157 @@ window.refreshNative = (force = false) => {
 };
 function renderAlarm() {
   const test = S.alarmTest || S.preview, active = S.ringing || S.preview, who = S.alarmAnchor || "主播";
-  const key = [test, active, S.alarmTitle, S.config.snoozeMinutes, who].join("|");
+  const key = [test, active, S.alarmTitle, S.config.snoozeMinutes, who, S.alarmAnchorId || ""].join("|");
   if (alarmPainted !== key) {
     alarmPainted = key;
     $("#alarm-root").innerHTML = `<div class="alarm-eyebrow"><span class="dot ${active ? "live" : ""}"></span>${test ? "RINGTONE TEST" : "LIVE NOW"}</div><div class="alarm-halo"><img src="hazel.png" alt="正在提醒你的VR闹钟插画"></div><h1>${active ? test ? "这一声，听见了吗？" : esc(who) + " 开播啦。" : "响铃已结束。"}</h1><p class="alarm-name">${test ? "VR闹钟 · 和正式提醒一样响" : esc(who)}</p><p class="alarm-title">${esc(S.alarmTitle || (test ? "确认声音、振动与锁屏显示" : "去直播间，和主播见个面。"))}</p><p class="countdown" id="remaining"></p><div class="alarm-actions">${active ? test ? `<button class="primary" data-action="dismiss">${icon("check")}听见了，结束测试</button>` : `<button class="primary" data-action="openLive" data-anchor="${esc(S.alarmAnchorId || "")}">${icon("external")}去直播间 · 关闭响铃</button><button class="secondary" data-action="snooze">${icon("clock")}${S.config.snoozeMinutes} 分钟后再提醒</button><button class="quiet-close" data-action="dismiss">本场不再响铃</button>` : `<button class="primary" data-action="closeAlarm">知道了</button>`}</div><p class="footnote">${active ? "返回键只收起页面，铃声仍继续。<br>请点按上方按钮或通知中的关闭按钮。" : "同一场直播不会再次自动响铃。"}</p>`;
   }
   if ($("#remaining")) $("#remaining").textContent = active ? S.preview ? "界面预览 · 实际响铃需安装安卓应用" : `${Math.max(0, Math.ceil((S.alarmUntil - Date.now()) / 1e3))} 秒后自动停止` : "";
 }
+function petSection() {
+  const c = S.config, manqu = petCharacter() === "manqu";
+  return `<div class="section-label"><h2>桌面小宠物</h2><small>只在应用内活动</small></div><section class="card">${setting("养一只小宠物", "一只在底部走来走去的小宠物，偶尔会自己跳一下。它不联网、不占后台，只在你打开应用时活动。", sw("pet", c.pet !== false, "桌面小宠物"))}<div class="setting-row"><div class="grow"><h3>选择款式</h3><p class="sub">${manqu ? "满区 · 一几一几，好可爱的一条区" : "绿冻 · 绿果冻，头顶一颗樱桃"}</p></div><button class="text-button" data-action="petHop">逗它一下 ${icon("heart")}</button></div><div class="pet-picker"><button class="pet-choice ${manqu ? "selected" : ""}" data-pet="manqu" aria-label="选择满区" aria-pressed="${manqu}"><img src="pet/manqu.png" alt=""></button><button class="pet-choice ${manqu ? "" : "selected"}" data-pet="lvdong" aria-label="选择绿冻" aria-pressed="${manqu ? "false" : "true"}"><img src="pet/lvdong.png" alt=""></button></div><p class="hint" style="margin:6px 0 0">满区是「可爱满区」的桌宠本体，来回爬的时候会翻个面；绿冻是绿色那只果冻。小宠物走在下方的独立一栏里，不会挡住按钮；想逗它就点上面的「逗它一下」。</p></section>`;
+}
+const PET_SPEED = 30, PET_TURN_MS = 430, PET_HOP_MIN_MS = 9e3, PET_HOP_SPAN_MS = 7e3;
+const PET_LEAN_DEG = 3.4, PET_WOBBLE_DEG = 1.7, PET_BOB_PX = 1.9, PET_NOD_HZ = 0.9, PET_SWAY_HZ = 0.45;
+function facePet() {
+  if (pet.el) pet.el.classList.toggle("flip", pet.dir > 0);
+}
+const pet = { el: null, art: null, rig: null, head: null, collar: null, x: 0, dir: 1, phase: 0, last: 0, raf: 0, wait: 0, nextHop: 0, appliedOn: null, appliedCharacter: null };
+function petOn() {
+  return !!(S && S.config && S.config.pet !== false);
+}
+function petCharacter() {
+  return (S && S.config && S.config.petCharacter) === "lvdong" ? "lvdong" : "manqu";
+}
+function petMotionOk() {
+  return !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion:reduce)").matches);
+}
+function laneSize() {
+  const viewport = window.innerWidth || 360;
+  return { viewport, lane: Math.min(viewport, 580) };
+}
+const PET_GROUND_OVERLAP = 3;
+function standPet() {
+  if (!pet.el) return;
+  const nav = document.getElementById("nav"), content = $("#content");
+  const navTop = nav ? nav.getBoundingClientRect().top : 0;
+  if (!(navTop > 0)) return;
+  const foot = Math.round(window.innerHeight - navTop - PET_GROUND_OVERLAP);
+  pet.el.style.bottom = foot + "px";
+  const inside = content ? parseFloat(getComputedStyle(content).paddingBottom) || 0 : 0;
+  document.documentElement.style.setProperty("--pet-clearance", foot + (pet.el.offsetHeight || 56) - inside + "px");
+}
+function placePet() {
+  if (!pet.el) return;
+  const { viewport, lane } = laneSize(), gutter = 8;
+  const left = (viewport - lane) / 2 + gutter;
+  pet.el.style.transform = "translate3d(" + (left + pet.x) + "px,0,0)";
+}
+function petTravel() {
+  const { lane } = laneSize();
+  return Math.max(0, lane - (pet.el.offsetWidth || 56) - 16);
+}
+function posePet() {
+  if (!pet.head || !pet.collar) return;
+  const nod = Math.sin(pet.phase * PET_NOD_HZ * 6.2832) * PET_BOB_PX;
+  const lean = -PET_LEAN_DEG + Math.sin(pet.phase * PET_SWAY_HZ * 6.2832) * PET_WOBBLE_DEG;
+  pet.head.style.transform = "translateY(" + nod.toFixed(2) + "px) rotate(" + lean.toFixed(2) + "deg)";
+  pet.collar.style.transform = "translateY(" + (nod * 0.35).toFixed(2) + "px) rotate(" + (-lean * 0.45).toFixed(2) + "deg)";
+}
+function startPet() {
+  if (pet.raf || !petOn() || document.hidden || !petMotionOk()) return;
+  pet.last = 0;
+  pet.raf = requestAnimationFrame(petTick);
+}
+function stopPet() {
+  if (pet.raf) cancelAnimationFrame(pet.raf);
+  pet.raf = 0;
+}
+function petTick(ts) {
+  pet.raf = 0;
+  if (!petOn() || document.hidden || !petMotionOk()) return;
+  if (!pet.last) pet.last = ts;
+  const dt = Math.min(120, ts - pet.last) / 1e3;
+  pet.last = ts;
+  if (!pet.nextHop) pet.nextHop = ts + PET_HOP_MIN_MS + Math.random() * PET_HOP_SPAN_MS;
+  if (ts >= pet.nextHop) {
+    pet.nextHop = ts + PET_HOP_MIN_MS + Math.random() * PET_HOP_SPAN_MS;
+    petHop();
+  }
+  if (ts >= pet.wait) {
+    const travel = petTravel();
+    pet.x += pet.dir * PET_SPEED * dt;
+    if (pet.x >= travel) {
+      pet.x = travel;
+      pet.dir = -1;
+      pet.wait = ts + PET_TURN_MS;
+      facePet();
+    } else if (pet.x <= 0) {
+      pet.x = 0;
+      pet.dir = 1;
+      pet.wait = ts + PET_TURN_MS;
+      facePet();
+    }
+    placePet();
+  }
+  pet.phase = (pet.phase + dt) % 64;
+  posePet();
+  pet.raf = requestAnimationFrame(petTick);
+}
+function petHop() {
+  if (!pet.el || !petOn()) return;
+  pet.el.classList.remove("hop");
+  void pet.el.offsetWidth;
+  pet.el.classList.add("hop");
+  clearTimeout(petHop.timer);
+  petHop.timer = setTimeout(() => pet.el.classList.remove("hop"), 470);
+}
+function mountPet() {
+  pet.el = $("#pet");
+  pet.art = $("#pet-art");
+  pet.rig = $("#pet-rig");
+  pet.head = $("#pet-head");
+  pet.collar = $("#pet-collar");
+  if (!pet.el || !pet.art) return;
+  document.addEventListener("visibilitychange", () => {
+    document.hidden ? stopPet() : startPet();
+  });
+  window.addEventListener("resize", () => {
+    if (!pet.el.hidden) {
+      placePet();
+      standPet();
+    }
+  });
+  syncPet();
+}
+function syncPet() {
+  if (!pet.el || !pet.art) return;
+  const on = petOn(), character = petCharacter();
+  if (pet.appliedOn === on && pet.appliedCharacter === character) return;
+  pet.appliedOn = on;
+  pet.appliedCharacter = character;
+  pet.el.hidden = !on;
+  if (document.body) document.body.classList.toggle("has-pet", on);
+  if (!on) {
+    stopPet();
+    return;
+  }
+  const manqu = character === "manqu";
+  if (pet.rig) pet.rig.hidden = !manqu;
+  pet.art.hidden = manqu;
+  if (!manqu) pet.art.style.backgroundImage = "url(pet/lvdong.png)";
+  pet.x = 0;
+  pet.dir = 1;
+  pet.phase = 0;
+  facePet();
+  placePet();
+  standPet();
+  posePet();
+  startPet();
+}
 window.refreshNative();
+mountPet();
 setInterval(() => {
   if (!document.hidden) window.refreshNative();
 }, 2e3);

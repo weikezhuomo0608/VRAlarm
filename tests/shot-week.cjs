@@ -14,6 +14,11 @@ const server=http.createServer((req,res)=>{
 const cover='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="128" height="80"><rect width="128" height="80" fill="#4b6b80"/><circle cx="96" cy="26" r="20" fill="#8fb0c4"/><text x="8" y="70" font-size="14" fill="#e8f0f5">LIVE</text></svg>');
 
 const day=1<<2; // Wednesday
+// These arrangements sit on Wednesday, and only an arrangement whose day is today can read 直播中.
+// Pin the clock inside the 12:00–14:00 one so the live state and its cover thumbnail are in the
+// shot whatever day this runs, and so the "today" the page derives matches that Wednesday.
+const wednesday=new Date(); wednesday.setHours(13,0,0,0);
+wednesday.setDate(wednesday.getDate()+((2-((wednesday.getDay()+6)%7))+7)%7);
 const state={
     anchors:[
         {id:'a1',name:'羽啾chu2u',uid:1,room:2,enabled:true,alarm:true,avatar:false,snapshot:{status:1,cover},
@@ -26,7 +31,7 @@ const state={
     ],
     config:null,enabled:true,running:true,ringing:false,snapshot:{},networkError:'',serviceError:'',startError:'',
     inside:true,permissions:{notifications:true,alarmChannel:true,battery:true,fullScreen:true,exact:true,dnd:false},
-    zone:'Asia/Shanghai',deviceZone:'Asia/Shanghai',version:'1.1.5',now:Date.now(),backgroundSet:false,backgroundName:'',recoveryAt:0,
+    zone:'Asia/Shanghai',deviceZone:'Asia/Shanghai',version:'1.1.8',now:wednesday.getTime(),backgroundSet:false,backgroundName:'',recoveryAt:0,
 };
 
 async function shoot(page,file){

@@ -21,6 +21,7 @@ public final class Prefs {
         put(j,"snoozeMinutes",5); put(j,"quietCalls",true); put(j,"theme","light");
         put(j,"preStream",true); put(j,"ringQueue",false); put(j,"aiOcr",true); put(j,"aiKey",""); put(j,"aiModel","deepseek-flash");
         put(j,"turbo",true); put(j,"seedColor",""); put(j,"amoled",false); put(j,"hideRecents",false); put(j,"recovery",true); put(j,"backgroundDim",40); put(j,"cardOpacity",94);
+        put(j,"pet",true); put(j,"petCharacter","manqu");
                 JSONArray rules=new JSONArray(); JSONObject w=new JSONObject();
         put(w,"id","night");put(w,"name","凌晨守候");put(w,"start",60);put(w,"end",360);put(w,"days",127);put(w,"enabled",true);
         rules.put(w);put(j,"windows",rules);return j;
@@ -32,7 +33,7 @@ public final class Prefs {
     }
     public synchronized void update(JSONObject patch) throws JSONException {
         JSONObject j=config();
-        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery","turbo"};
+        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery","turbo","pet"};
         for(String k:bools) if(patch.has(k)){if(!(patch.get(k) instanceof Boolean))throw new JSONException("开关值无效");put(j,k,patch.getBoolean(k));}
         intSetting(j,patch,"volume",1,100);intSetting(j,patch,"backgroundDim",0,90);intSetting(j,patch,"cardOpacity",75,100);
         if(patch.has("seedColor")){String color=patch.getString("seedColor").trim();if(!color.isEmpty()&&!color.matches("#[0-9a-fA-F]{6}"))throw new JSONException("请输入六位 HEX 颜色，如 #536B81");put(j,"seedColor",color.toUpperCase(java.util.Locale.ROOT));}
@@ -42,7 +43,8 @@ public final class Prefs {
         if(patch.has("aiKey")){String v=patch.getString("aiKey").trim();put(j,"aiKey",v.length()>300?"":v);}
         if(patch.has("aiModel")){String v=patch.getString("aiModel").trim();if(v.isEmpty()||v.length()>80)throw new JSONException("模型名无效");put(j,"aiModel",v);}
         if(patch.has("theme")){String v=patch.getString("theme");if(!Arrays.asList("light","dark","system").contains(v))throw new JSONException("主题无效");put(j,"theme",v);}
-                if(patch.has("ringtone")){String v=patch.getString("ringtone");if(!Arrays.asList("starlight","morning","urgent","system","custom").contains(v))throw new JSONException("铃声无效");if("custom".equals(v)&&db.getString("customPath","").isEmpty())throw new JSONException("请先导入音频文件");put(j,"ringtone",v);}
+                if(patch.has("petCharacter")){String v=patch.getString("petCharacter");if(!Arrays.asList("manqu","lvdong").contains(v))throw new JSONException("宠物角色无效");put(j,"petCharacter",v);}
+        if(patch.has("ringtone")){String v=patch.getString("ringtone");if(!Arrays.asList("starlight","morning","urgent","system","custom").contains(v))throw new JSONException("铃声无效");if("custom".equals(v)&&db.getString("customPath","").isEmpty())throw new JSONException("请先导入音频文件");put(j,"ringtone",v);}
         if(patch.has("windows")){
             JSONArray a=patch.getJSONArray("windows");if(a.length()>32)throw new JSONException("最多支持 32 个时段");
             JSONArray cleaned=new JSONArray();Set<String> ids=new HashSet<>();
