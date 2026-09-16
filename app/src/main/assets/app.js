@@ -751,15 +751,45 @@ function settings() {
   if (p.powerSave) html = `<div class="card warning"><p>手机当前处于省电模式，后台提醒可能延迟。</p></div>` + html;
   $("#content").innerHTML = html;
 }
+let historyRows = null, historyListMarkup = "";
+function historyEntryMarkup(e) {
+  return `<article class="history-entry"><div class="label-icon ${e.type === "live" ? "green" : e.type === "warning" ? "amber" : ""}">${icon(e.type === "live" ? "bell" : e.type === "warning" ? "info" : e.type === "snooze" ? "clock" : e.type === "test" ? "sound" : "history")}</div><div class="grow"><h3>${esc(e.title)}</h3><p>${esc(e.detail)}</p><time>${stamp(e.at, true)}</time></div></article>`;
+}
+function historyListMarkupOf(list) {
+  return list.length ? list.map(historyEntryMarkup).join("") : `<div class="empty"><div class="label-icon">${icon("history")}</div><h2>故事还没开始</h2><p>开启守候或完成一次响铃测试后，<br>这里就会留下记录。</p></div>`;
+}
+function historyShell() {
+  return heading("EVERY LITTLE MOMENT", "每一声，都有记录。", "最近 200 条记录仅保存在你的手机。") + `<div class="section-label"><h2>通知与运行记录</h2><button class="text-button" data-action="clearHistory">清空</button></div><div id="history-list" class="card">${historyListMarkup}</div>`;
+}
+function forgetHistory() {
+  historyRows = null;
+  historyListMarkup = "";
+}
 async function history() {
   const parent = $("#content");
-  parent.innerHTML = heading("EVERY LITTLE MOMENT", "每一声，都有记录。", "最近 200 条记录仅保存在你的手机。") + `<div class="section-label"><h2>通知与运行记录</h2><button class="text-button" data-action="clearHistory">清空</button></div><div id="history-list" class="card"></div>`;
+  if (historyRows === null) {
+    try {
+      historyRows = await api("history");
+    } catch (e) {
+      historyRows = [];
+      toast(e.message);
+    }
+    if (route !== "history") return;
+    historyListMarkup = historyListMarkupOf(historyRows);
+    parent.innerHTML = historyShell();
+    return;
+  }
+  parent.innerHTML = historyShell();
   try {
     const list = await api("history");
     if (route !== "history") return;
-    $("#history-list").innerHTML = list.length ? list.map((e) => `<article class="history-entry"><div class="label-icon ${e.type === "live" ? "green" : e.type === "warning" ? "amber" : ""}">${icon(e.type === "live" ? "bell" : e.type === "warning" ? "info" : e.type === "snooze" ? "clock" : e.type === "test" ? "sound" : "history")}</div><div class="grow"><h3>${esc(e.title)}</h3><p>${esc(e.detail)}</p><time>${stamp(e.at, true)}</time></div></article>`).join("") : `<div class="empty"><div class="label-icon">${icon("history")}</div><h2>故事还没开始</h2><p>开启守候或完成一次响铃测试后，<br>这里就会留下记录。</p></div>`;
-  } catch (e) {
-    toast(e.message);
+    historyRows = list;
+    const markup = historyListMarkupOf(list);
+    if (markup === historyListMarkup) return;
+    historyListMarkup = markup;
+    const box = $("#history-list");
+    if (box) box.innerHTML = markup;
+  } catch (ignored) {
   }
 }
 function openModal(title, body, actions = "") {
@@ -973,6 +1003,7 @@ async function perform(action, anchorId = "") {
   }
   if (action === "confirmClear") {
     await api("clearHistory");
+    forgetHistory();
     closeModal();
     history();
     return;

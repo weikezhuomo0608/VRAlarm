@@ -526,7 +526,39 @@ function settings(){const c=S.config,p=S.permissions,rows=[['notifications','bel
     if(p.powerSave)html=`<div class="card warning"><p>手机当前处于省电模式，后台提醒可能延迟。</p></div>`+html;
     $('#content').innerHTML=html;
 }
-async function history(){const parent=$('#content');parent.innerHTML=heading('EVERY LITTLE MOMENT','每一声，都有记录。','最近 200 条记录仅保存在你的手机。')+`<div class="section-label"><h2>通知与运行记录</h2><button class="text-button" data-action="clearHistory">清空</button></div><div id="history-list" class="card"></div>`;try{const list=await api('history');if(route!=='history')return;$('#history-list').innerHTML=list.length?list.map(e=>`<article class="history-entry"><div class="label-icon ${e.type==='live'?'green':e.type==='warning'?'amber':''}">${icon(e.type==='live'?'bell':e.type==='warning'?'info':e.type==='snooze'?'clock':e.type==='test'?'sound':'history')}</div><div class="grow"><h3>${esc(e.title)}</h3><p>${esc(e.detail)}</p><time>${stamp(e.at,true)}</time></div></article>`).join(''):`<div class="empty"><div class="label-icon">${icon('history')}</div><h2>故事还没开始</h2><p>开启守候或完成一次响铃测试后，<br>这里就会留下记录。</p></div>`;}catch(e){toast(e.message);}}
+// 记录页是唯一「数据要过桥」的页面，所以不能先写空壳、等回包再填列表：那样中间会真实绘制
+// 一次「列表是空的」的画面，而手机上要拼最多 200 条记录，这一帧长到能看见 —— 那一下白闪就是它。
+// 现在先读再画，并把已读到的记录留在内存里：进入页面只画一次，之后的刷新只替换列表、且只在
+// 记录真的变了时才替换。
+let historyRows=null,historyListMarkup='';
+function historyEntryMarkup(e){return `<article class="history-entry"><div class="label-icon ${e.type==='live'?'green':e.type==='warning'?'amber':''}">${icon(e.type==='live'?'bell':e.type==='warning'?'info':e.type==='snooze'?'clock':e.type==='test'?'sound':'history')}</div><div class="grow"><h3>${esc(e.title)}</h3><p>${esc(e.detail)}</p><time>${stamp(e.at,true)}</time></div></article>`;}
+function historyListMarkupOf(list){return list.length?list.map(historyEntryMarkup).join(''):`<div class="empty"><div class="label-icon">${icon('history')}</div><h2>故事还没开始</h2><p>开启守候或完成一次响铃测试后，<br>这里就会留下记录。</p></div>`;}
+function historyShell(){return heading('EVERY LITTLE MOMENT','每一声，都有记录。','最近 200 条记录仅保存在你的手机。')+`<div class="section-label"><h2>通知与运行记录</h2><button class="text-button" data-action="clearHistory">清空</button></div><div id="history-list" class="card">${historyListMarkup}</div>`;}
+/** 清空记录后必须丢掉缓存，否则会先把刚删掉的那些记录画出来再刷新。 */
+function forgetHistory(){historyRows=null;historyListMarkup='';}
+async function history(){
+    const parent=$('#content');
+    if(historyRows===null){
+        // 第一次进入：先读，再一次性画出整页（包括列表），不经过「列表还是空的」那一帧。
+        try{historyRows=await api('history');}catch(e){historyRows=[];toast(e.message);}
+        if(route!=='history')return;
+        historyListMarkup=historyListMarkupOf(historyRows);
+        parent.innerHTML=historyShell();
+        return;
+    }
+    // 再次进入或重绘：直接用已读到的内容铺满，避免闪；随后静默刷新，只替换列表，且只在内容
+    // 真的变了时才写 DOM。
+    parent.innerHTML=historyShell();
+    try{
+        const list=await api('history');
+        if(route!=='history')return;
+        historyRows=list;
+        const markup=historyListMarkupOf(list);
+        if(markup===historyListMarkup)return;
+        historyListMarkup=markup;
+        const box=$('#history-list');if(box)box.innerHTML=markup;
+    }catch(ignored){}
+}
 function openModal(title,body,actions=''){const m=$('#modal');m.innerHTML=`<section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sheet-head"><h2>${esc(title)}</h2><button data-action="closeModal" aria-label="关闭弹窗">${icon('close')}</button></div>${body}${actions}</section>`;m.hidden=false;document.body.style.overflow='hidden';m.querySelector('button')?.focus();}
 function closeModal(){const m=$('#modal');if(!m)return;m.hidden=true;m.innerHTML='';document.body.style.overflow='';ruleDraft=null;anchorDraft=null;}
 function editRule(id,preset){const existing=S.config.windows.find(w=>w.id===id);ruleDraft=existing?clone(existing):{id:'r'+Date.now(),name:'自定义时段',start:60,end:360,days:127,enabled:true};if(preset){const sets={night:['凌晨守候',60,360],overnight:['深夜守候',1380,420],evening:['晚间守候',1140,1380]};const [name,start,end]=sets[preset];Object.assign(ruleDraft,{name,start,end});}
@@ -599,7 +631,7 @@ async function perform(action,anchorId=''){
     if(action==='deleteRule'){const rules=S.config.windows.filter(w=>w.id!==ruleDraft.id);await save({windows:rules,allDay:rules.some(w=>w.enabled)?S.config.allDay:true});closeModal();toast('时段已删除');return;}
     if(action==='testDialog'){testDialog();return;}if(action==='privacy'){privacy();return;}if(action==='chooseTimezone'){await chooseTimezone();return;}
     if(action==='clearHistory'){openModal('清空通知记录？','<p class="body-copy">将删除手机上已有的通知与运行记录，提醒设置不变。</p>','<div class="sheet-actions"><button class="secondary" data-action="closeModal">取消</button><button class="primary" data-action="confirmClear">清空记录</button></div>');return;}
-    if(action==='confirmClear'){await api('clearHistory');closeModal();history();return;}
+    if(action==='confirmClear'){await api('clearHistory');forgetHistory();closeModal();history();return;}
     if(action==='addAnchor'){editAnchor('');return;}
     if(action==='addScheduleEntry'){addScheduleEntry();return;}
     if(action==='parseScheduleText'){await parseScheduleIntoDraft();return;}

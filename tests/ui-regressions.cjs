@@ -167,7 +167,7 @@ function installMock() {
             mock.probes = (mock.probes || 0) + 1;
             setTimeout(() => reply(id, state.permissions.notifications ? true : '系统尚未允许通知，请先完成通知授权', state.permissions.notifications), 0); return;
         }
-        setTimeout(() => reply(id, action === 'history' ? [] : true), 0);
+        setTimeout(() => reply(id, action === 'history' ? (mock.history || []) : true), 0);
     } };
 }
 
@@ -1269,6 +1269,37 @@ function installMock() {
             }
             assert.deepEqual(errors, [], 'no browser script errors');
         }
+            await test('opening the records page paints it once, not twice', async () => {
+                await reset();
+                // Forty entries: enough that composing the list takes real time on a phone, which is
+                // what turns the intermediate empty shell into a visible flash.
+                await page.evaluate(() => {
+                    __mock.history = Array.from({ length: 40 }, (_, i) => ({
+                        type: i % 3 === 0 ? 'live' : 'system', title: '记录 ' + i,
+                        detail: '详情 ' + i, at: Date.now() - i * 60000
+                    }));
+                });
+                const paints = await page.evaluate(async () => {
+                    const content = document.getElementById('content');
+                    let batches = 0, emptyBatches = 0;
+                    const seen = new MutationObserver(records => {
+                        if (!records.some(r => r.type === 'childList')) return;
+                        batches++;
+                        const list = document.getElementById('history-list');
+                        if (list && !list.querySelector('.history-entry') && !list.textContent.trim()) emptyBatches++;
+                    });
+                    seen.observe(content, { childList: true, subtree: true });
+                    document.querySelector('[data-action="history"]').click();
+                    await new Promise(r => setTimeout(r, 600));
+                    seen.disconnect();
+                    return { batches, emptyBatches, entries: document.querySelectorAll('.history-entry').length };
+                });
+                console.log('   records page paints:', JSON.stringify(paints));
+                assert.equal(paints.entries, 40, 'every record must be rendered');
+                // The list must never be painted empty and filled afterwards: that intermediate
+                // frame is the flash the user sees when opening the page.
+                assert.equal(paints.emptyBatches, 0, 'the list must not be painted empty first');
+            });
         console.log(`PASS: ${results.length} ${legacy ? 'original regression reproductions' : 'UI and bridge regression scenarios'}`);
         if (output) fs.writeFileSync(path.join(output, legacy ? 'original-regressions.json' : 'ui-regressions.json'), JSON.stringify({ legacy, results, errors }, null, 2));
     } finally {

@@ -27,6 +27,22 @@
 
 **本次未验证**：真机上「进入时段自动恢复」的实际时点（依赖 `setAlarmClock` 与精确闹钟权限）；无「精确闹钟」权限时边界唤醒被系统推迟到约 9 分钟的表现；长时间暂停（跨夜）后前台服务能否被正常重新拉起。
 
+### 1.1.0808 修订二（2026-09-16：记录页闪屏，版本号未变）
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 界面回归 | **72** 个场景通过 | 新增「opening the records page paints it once, not twice」：用 MutationObserver 统计 `#content` 的绘制批次，40 条记录下要求**只画一次**、且**不出现「列表为空」的中间帧**。修复前实测 `batches=2, emptyBatches=1`（即用户看到的闪），修复后 `batches=1, emptyBatches=0` |
+| 规则内核断言 | 未改动 Java | 本次只动界面脚本与界面测试；核心断言仍 36,041 + 12 + 16 + 51 + 112 + 20 + 13 条 |
+| APK 编译 | 通过 | `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `e641ca3c…`），`versionCode=40`／`versionName=1.1.8`／label「VR闹钟」，已核对包内界面含修复后的记录页 |
+
+### 1.1.0808 修订二（2026-09-16：记录页闪屏，版本号未变）
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 界面回归 | **72** 个场景通过 | 新增「opening the records page paints it once, not twice」：用 MutationObserver 统计 `#content` 的绘制批次，40 条记录下要求**只画一次**、且**不出现「列表为空」的中间帧**。修复前实测 `batches=2, emptyBatches=1`（即用户看到的闪），修复后 `batches=1, emptyBatches=0` |
+| 规则内核断言 | 未改动 Java | 本次只动界面脚本与界面测试；核心断言仍 36,041 + 12 + 16 + 51 + 112 + 20 + 13 条 |
+| APK 编译 | 通过 | `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `e641ca3c…`），`versionCode=40`／`versionName=1.1.8`／label「VR闹钟」，已核对包内界面含修复后的记录页 |
+
 ## 1.1.7（本地版：公开 1.1.6 + 桌面小宠物）
 
 | 验证 | 结果 | 范围 |
