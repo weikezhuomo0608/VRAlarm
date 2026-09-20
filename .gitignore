@@ -74,3 +74,4 @@ tools/list_pet_textures.py
 tools/render_pet_preview.py
 tools/spine_render.py
 tests/_petdiag.cjs
+tests/_quietshot.cjs

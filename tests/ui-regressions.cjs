@@ -39,15 +39,18 @@ function installMock() {
         config: { soundWithoutNotifications: false, allDay: true, timezone: 'device', catchUp: false, pollSeconds: 30,
             reliable: true, boot: true, ringtone: 'starlight', customName: '未选择', volume: 85, aiOcr: true, aiKey: 'sk-test', aiModel: 'deepseek-flash', preStream: true, ringQueue: false,
             seedColor: '', amoled: false, hideRecents: false, recovery: true, turbo: true, backgroundDim: 40, cardOpacity: 94,
-            pet: true, petCharacter: 'manqu',
+            pet: true, petCharacter: 'manqu', silentUntil: 0, highFrequency: false,
+            highWindows: [{ id: 'h1', name: '上午高频', start: 480, end: 720, days: 127, enabled: true },
+                { id: 'h2', name: '下午高频', start: 840, end: 960, days: 127, enabled: true },
+                { id: 'h3', name: '晚间高频', start: 1200, end: 0, days: 127, enabled: true }],
             ramp: true, vibrate: true, duration: 60, snoozeMinutes: 5, quietCalls: true, theme: 'light',
             windows: [{ id: 'night', name: '凌晨守候', start: 60, end: 360, days: 127, enabled: true }] },
-        enabled: false, running: false, ringing: false, snapshot: {}, networkError: '', serviceError: '', startError: '',
+        enabled: false, running: false, ringing: false, alarmSilent: false, highInside: false, highNextBoundary: 0, pollSecondsNow: 30, snapshot: {}, networkError: '', serviceError: '', startError: '',
         anchors: [
-            { id: 'hazel', name: '灰泽满 Hazel', uid: 1298779265, room: 1713546334, enabled: true, avatar: true, alarm: true,
+            { id: 'hazel', name: '灰泽满 Hazel', uid: 1298779265, uidText: '1298779265', room: 1713546334, enabled: true, avatar: true, alarm: true,
                 schedule: [{ id: 'w1', days: 16, start: 1200, end: 1260, note: '游戏' }], scheduleImage: false, stats: { count7: 3, count30: 11, last: Date.now() - 3600000, lastMinutes: 95 },
                 snapshot: { status: 1, start: 1700000000000, checkedAt: Date.now(), title: '画画中' } },
-            { id: 'other', name: '另一位主播', uid: 111222, room: 333444, enabled: false, avatar: false, alarm: true, schedule: [], scheduleImage: false, snapshot: {} }
+            { id: 'other', name: '另一位主播', uid: 111222, uidText: '111222', room: 333444, enabled: false, avatar: false, alarm: true, schedule: [], scheduleImage: false, snapshot: {} }
         ],
         inside: true, schedulePaused: false, hasWindow: true, nextBoundary: 0, zone: 'Asia/Shanghai', deviceZone: 'Asia/Shanghai', version: '1.2.1',
         watchNotification: {status:'stopped',serviceRunning:false,registered:false,channelImportance:2},
@@ -79,6 +82,16 @@ function installMock() {
         if (action === 'save') {
             if (mock.failSave) { mock.failSave = false; setTimeout(() => reply(id, '模拟保存失败', false), 0); return; }
             Object.assign(state.config, patch);
+            // The page sends a duration and never a deadline — the native side owns the clock —
+            // and the reply it paints from carries the absolute deadline instead. The bridge is
+            // mirrored here, including the Java Long.MAX_VALUE that means "until I say otherwise".
+            mock.lastSave = clone(patch);
+            if (patch.silentMinutes !== undefined) {
+                const minutes = patch.silentMinutes;
+                state.config.silentUntil = minutes === 0 ? 0
+                    : minutes < 0 ? 9223372036854775807 : Date.now() + minutes * 60000;
+                delete state.config.silentMinutes;
+            }
             if (patch.timezone) state.zone = patch.timezone === 'device' ? state.deviceZone : patch.timezone;
             const captured = clone(state.config);
             mock.saves++;
@@ -100,6 +113,10 @@ function installMock() {
             const incoming = patch.anchor;
             if (!incoming.id) incoming.id = 'anchor-' + (mock.anchorSeq = (mock.anchorSeq || 0) + 1);
             if (incoming.alarm === undefined) incoming.alarm = true;
+            // The real bridge stores the uid as a Java long and echoes back both that long and its
+            // exact decimal text. Mirroring both here is what lets a test tell the two apart: a
+            // 16-digit uid survives only through `uidText`.
+            incoming.uidText = String(incoming.uid);
             const at = state.anchors.findIndex(x => x.id === incoming.id);
             if (at < 0) state.anchors.push({ ...incoming, avatar: false, schedule: [], scheduleImage: false, snapshot: {} });
             else state.anchors[at] = { ...state.anchors[at], ...incoming };
@@ -145,12 +162,19 @@ function installMock() {
         }
         if (action === 'resolveAnchor') {
             mock.lastResolve = patch;
+            mock.lastResolveReply = null;
             if (mock.resolveError) { const reason = mock.resolveError; setTimeout(() => reply(id, reason, false), 0); return; }
             if (String(patch.room) === '40404') { setTimeout(() => reply(id, '没有找到这个直播间，请检查房间号', false), 0); return; }
             // A uid-only request has no room yet: the bridge is what maps it, so the mock
             // answers with the room that the uid belongs to, exactly like the real one.
             const room = Number(patch.room) || 1713546334;
-            setTimeout(() => reply(id, { id: patch.id || '', room, uid: Number(patch.uid) || 999999, name: '识别到的主播', avatar: true }), 0); return;
+            // The real bridge replies with the uid twice: as the Java long (a JSON number, which
+            // is already rounded past 2^53-1) and as its exact decimal text. Both are sent here so
+            // a test can prove the page read the lossless one, since they differ on a 16-digit uid.
+            const uid = patch.uid ? String(patch.uid) : '999999';
+            const answer = { id: patch.id || '', room, uid: Number(uid), uidText: uid, name: '识别到的主播', avatar: true };
+            mock.lastResolveReply = answer;
+            setTimeout(() => reply(id, answer), 0); return;
         }
         if (action === 'toggle') {
             state.enabled=patch.enabled;state.running=patch.enabled;
@@ -661,9 +685,10 @@ function installMock() {
                 await page.locator('[data-action="addAnchor"]').click();
                 await page.fill('#anchor-room', '555666');
                 await page.locator('[data-action="resolveAnchor"]').click(); await settle();
-                // Bare digits are a uid: that is the lookup the field now asks for.
+                // Bare digits are a uid: that is the lookup the field now asks for. It crosses the
+                // bridge as a digit string, so that is the shape asserted here.
                 assert.equal(await page.evaluate(() => __mock.lastResolve.room), 0);
-                assert.equal(await page.evaluate(() => __mock.lastResolve.uid), 555666);
+                assert.equal(await page.evaluate(() => __mock.lastResolve.uid), '555666');
                 assert.equal(await page.inputValue('#anchor-name'), '识别到的主播');
                 assert.match(await page.locator('#anchor-preview').innerText(), /UID 555666/);
                 // The uid the user typed stays in the field instead of being swapped for a room id.
@@ -671,7 +696,7 @@ function installMock() {
                 await page.locator('[data-action="saveAnchorDraft"]').click(); await settle();
                 const saved = await page.evaluate(() => __mock.lastAnchor);
                 assert.equal(saved.name, '识别到的主播');
-                assert.equal(saved.uid, 555666);
+                assert.equal(saved.uid, '555666');
                 assert.equal(saved.room, 1713546334);
                 assert.equal(await page.locator('#modal').isVisible(), false);
             });
@@ -916,16 +941,17 @@ function installMock() {
                 await page.locator('[data-action="resolveAnchor"]').click(); await settle();
                 let sent = await page.evaluate(() => __mock.lastResolve);
                 assert.equal(sent.room, 1713546334);
-                assert.equal(sent.uid, 0);
+                // A link that named a room sends no uid at all, so the page passes an empty string.
+                assert.equal(sent.uid, '');
                 await page.fill('#anchor-room', 'https://space.bilibili.com/1298779265');
                 await page.locator('[data-action="resolveAnchor"]').click(); await settle();
                 sent = await page.evaluate(() => __mock.lastResolve);
                 assert.equal(sent.room, 0);
-                assert.equal(sent.uid, 1298779265);
+                assert.equal(sent.uid, '1298779265');
                 await page.fill('#anchor-room', 'UID 1234567');
                 await page.locator('[data-action="resolveAnchor"]').click(); await settle();
                 sent = await page.evaluate(() => __mock.lastResolve);
-                assert.equal(sent.uid, 1234567);
+                assert.equal(sent.uid, '1234567');
             });
             await test('the background picture renders and can be removed', async () => {
                 await reset('settings');
@@ -1269,7 +1295,7 @@ function installMock() {
             }
             assert.deepEqual(errors, [], 'no browser script errors');
         }
-            await test('opening the records page paints it once, not twice', async () => {
+        await test('opening the records page paints it once, not twice', async () => {
                 await reset();
                 // Forty entries: enough that composing the list takes real time on a phone, which is
                 // what turns the intermediate empty shell into a visible flash.
@@ -1299,6 +1325,252 @@ function installMock() {
                 // The list must never be painted empty and filled afterwards: that intermediate
                 // frame is the flash the user sees when opening the page.
                 assert.equal(paints.emptyBatches, 0, 'the list must not be painted empty first');
+            });
+            // The live API is unreachable from the harness, so "识别主播信息" is replayed with the
+            // answer the bridge gives for a uid that owns one room. The 16-digit uid is the shape
+            // Bilibili issues to new accounts: it cannot be mistaken for a room number, and it used
+            // to be rejected outright by the field's digit limit.
+            await test('add-anchor: a 16-digit uid reaches the bridge as a uid and saves', async () => {
+                await reset('anchors');
+                await page.locator('[data-action="addAnchor"]').click();
+                await page.locator('#anchor-room').fill('3546729368520811');
+                await page.evaluate(() => { __mock.lastResolve = null; __mock.lastResolveReply = null; });
+                await page.locator('#modal [data-action="resolveAnchor"]').click();
+                await settle();
+                const sent = await page.evaluate(() => __mock.lastResolve);
+                // The page must hand the uid over as a digit STRING. As a JSON number the bridge
+                // would still parse it, but on the page side Number() would have already rounded it
+                // before serialisation, so a string is the only lossless shape.
+                assert.equal(sent.room, 0);
+                assert.equal(sent.uid, '3546729368520811');
+                assert.equal(await page.locator('#anchor-name').inputValue(), '识别到的主播');
+                assert.equal(await page.locator('#anchor-room').inputValue(), '3546729368520811');
+                assert.equal(await page.locator('#anchor-error').innerText(), '');
+                await page.locator('#anchor-name').fill('Vedal和Neuro-sama');
+                await page.locator('#modal [data-action="saveAnchorDraft"]').click();
+                await settle();
+                const saved = await page.evaluate(() => __mock.lastAnchor);
+                assert.equal(saved.name, 'Vedal和Neuro-sama');
+                assert.equal(saved.uid, '3546729368520811');
+                assert.equal(saved.room, 1713546334);
+                assert.equal(await page.locator('#modal').isVisible(), false);
+            });
+            // Every 16-digit uid is past Number.MAX_SAFE_INTEGER except a lucky few, and
+            // 9999999999999999 is the worst case: Number('9999999999999999') is 10000000000000000.
+            // If any hop routes the uid through a Number the field, the preview and the saved row
+            // all drift to a different account, so the value is checked end to end as text.
+            await test('add-anchor: the largest 16-digit uid survives the round trip unrounded', async () => {
+                await reset('anchors');
+                await page.locator('[data-action="addAnchor"]').click();
+                await page.locator('#anchor-room').fill('9999999999999999');
+                await page.evaluate(() => { __mock.lastResolve = null; __mock.lastResolveReply = null; });
+                await page.locator('#modal [data-action="resolveAnchor"]').click();
+                await settle();
+                const sent = await page.evaluate(() => __mock.lastResolve);
+                assert.equal(sent.uid, '9999999999999999');
+                // Prove the string is what carries the value. Note the numeric copy has to be read
+                // as TEXT to see the damage: Number('9999999999999999') and the literal
+                // 9999999999999999 are the same rounded double, so comparing them as numbers cannot
+                // tell them apart at all.
+                const echoed = await page.evaluate(() => ({ text: __mock.lastResolveReply.uidText, numberAsText: String(__mock.lastResolveReply.uid) }));
+                assert.equal(echoed.text, '9999999999999999');
+                assert.equal(echoed.numberAsText, '10000000000000000', 'the JSON number copy is expected to be lossy');
+                assert.equal(await page.locator('#anchor-room').inputValue(), '9999999999999999');
+                assert.equal(await page.locator('#anchor-error').innerText(), '');
+                assert.equal(await page.locator('.anchor-preview .sub').innerText(), 'UID 9999999999999999 · 直播间 1713546334');
+                await page.locator('#anchor-name').fill('边界主播');
+                await page.locator('#modal [data-action="saveAnchorDraft"]').click();
+                await settle();
+                const saved = await page.evaluate(() => __mock.lastAnchor);
+                assert.equal(saved.uid, '9999999999999999', 'the saved uid must not be rounded');
+            });
+            // The list, the edit form and the two toggles all read the uid back out of the state the
+            // bridge returned. Before the exact text copy existed they read the rounded long, so a
+            // 16-digit anchor was displayed wrong and its toggles wrote the rounded value back.
+            await test('a stored 16-digit uid survives the list, the edit form and both toggles', async () => {
+                await reset('anchors');
+                const big = '9999999999999999';
+                await page.evaluate(uid => {
+                    const a = __mock.state.anchors[1];
+                    a.uid = Number(uid); a.uidText = uid; a.name = '边界主播'; a.room = 1713546334;
+                    return window.refreshNative(true);
+                }, big);
+                await page.locator('[data-route="anchors"]').last().click();
+                await settle();
+                assert.match(await page.locator('.anchor-card').last().innerText(), /UID 9999999999999999/);
+                // The editor's field is seeded from the room (it accepts a room, a uid or a link),
+                // so the uid is checked where it is actually shown back: the preview under the field.
+                await page.locator('[data-anchor-edit="other"]').click();
+                assert.match(await page.locator('#anchor-preview').innerText(), /UID 9999999999999999/);
+                await page.locator('[data-action="closeModal"]').click();
+                await page.evaluate(() => { __mock.lastAnchor = null; });
+                await page.locator('[data-toggle="anchor:other"]').click(); await settle();
+                assert.equal((await page.evaluate(() => __mock.lastAnchor)).uid, big, 'the detection toggle must not write back a rounded uid');
+                await page.evaluate(() => { __mock.lastAnchor = null; });
+                await page.locator('[data-toggle="ring:other"]').click(); await settle();
+                assert.equal((await page.evaluate(() => __mock.lastAnchor)).uid, big, 'the bell toggle must not write back a rounded uid');
+            });
+            // The overflow guard: past 18 digits the value cannot fit a Java long either, so the
+            // field refuses it before anything is sent rather than letting the bridge truncate it.
+            await test('add-anchor: a 19-digit number is refused before it reaches the bridge', async () => {
+                await reset('anchors');
+                await page.locator('[data-action="addAnchor"]').click();
+                await page.locator('#anchor-room').fill('1234567890123456789');
+                await page.evaluate(() => { __mock.lastResolve = null; __mock.lastResolveReply = null; });
+                await page.locator('#modal [data-action="resolveAnchor"]').click();
+                await settle();
+                assert.equal(await page.evaluate(() => __mock.lastResolve), null, 'nothing may be sent');
+                assert.notEqual(await page.locator('#anchor-error').innerText(), '');
+            });
+            // ---- silent mode ---------------------------------------------------------------
+            // A reminder that arrives without a sound must never be a surprise: the page has to
+            // carry the choice to the store as a duration (the native side owns the clock), show
+            // the countdown while it lasts, and say so on the ringing page.
+            await test('the silent-mode choice travels as a duration, never as a deadline', async () => {
+                await reset('sound');
+                const card = page.locator('[data-quiet]');
+                assert.match(await card.innerText(), /当前正常响铃/);
+                await page.locator('[data-quiet-minutes="30"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.lastSave.silentMinutes), 30);
+                assert.equal(await page.evaluate(() => __mock.lastSave.silentUntil), undefined,
+                    'the page must not compute a deadline of its own — the store owns the clock');
+                assert.equal(await page.evaluate(() => Math.round((__mock.state.config.silentUntil - Date.now()) / 60000)), 30,
+                    'the stored deadline is the duration that was asked for');
+                assert.match(await card.innerText(), /静音中 · 剩余 30 分钟/);
+                assert.match(await page.locator('#toast').innerText(), /已静音 30 分钟/);
+                assert.equal(await page.locator('[data-quiet-minutes="0"]').count(), 1, 'a way back is offered while it is on');
+            });
+            await test('silence ends by itself and the home page shows how long is left', async () => {
+                await reset();
+                await page.evaluate(() => { __mock.state.config.silentUntil = Date.now() - 1000; return window.refreshNative(true); });
+                assert.equal(await page.locator('[data-action="quietDialog"]').count(), 0, 'an expired deadline is not silent');
+                await page.evaluate(() => { __mock.state.config.silentUntil = Date.now() + 90 * 60000; return window.refreshNative(true); });
+                const card = page.locator('section.card', { hasText: '静音模式' }).first();
+                assert.match(await card.innerText(), /静音模式 · 剩余 1 小时 30 分钟/);
+                await page.locator('[data-action="quietDialog"]').click(); await settle();
+                assert.match(await page.locator('#modal').innerText(), /全屏提醒与通知照常/);
+                assert.equal(await page.locator('#modal [data-quiet-minutes="0"]').count(), 1, 'the dialog can switch it off again');
+                await page.locator('#modal [data-quiet-minutes="-1"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.lastSave.silentMinutes), -1, 'manual silence is its own choice');
+                assert.equal(await page.locator('#modal').isHidden(), true, 'the dialog closes on its own reply');
+                assert.match(await card.innerText(), /静音模式 · 手动恢复/, 'no countdown is promised for manual silence');
+                await page.evaluate(() => { __mock.state.config.silentUntil = 0; return window.refreshNative(true); });
+                assert.equal(await page.locator('[data-action="quietDialog"]').count(), 0, 'and the card goes when silence is off');
+            });
+            await test('the ringing page says out loud that this alarm makes no sound', async () => {
+                // The alarm page is its own document, so this scenario navigates straight to it.
+                await page.goto(`http://127.0.0.1:${server.address().port}/alarm.html`);
+                await page.waitForFunction(() => typeof window.refreshNative === 'function');
+                const ring = async silent => page.evaluate(async value => {
+                    Object.assign(__mock.state, {
+                        ringing: true, alarmTest: false, alarmSilent: value, alarmAnchorId: 'hazel',
+                        alarmAnchor: '灰泽满 Hazel', alarmTitle: '画画中', alarmUntil: Date.now() + 60000,
+                    });
+                    await window.refreshNative(true);
+                }, silent);
+                await ring(false);
+                assert.doesNotMatch(await page.locator('#alarm-root').innerText(), /静音模式/);
+                assert.match(await page.locator('#alarm-root .footnote').innerText(), /铃声仍继续/);
+                await ring(true);
+                assert.match(await page.locator('#alarm-root').innerText(), /静音模式 · 只全屏提醒与发通知，不响铃、不振动/);
+                assert.match(await page.locator('#alarm-root .footnote').innerText(), /提醒仍继续/);
+                assert.match(await page.locator('.alarm-actions .primary').innerText(), /去直播间/,
+                    'the way into the room is unchanged by silence');
+                // The flag describes the alarm that is actually sounding. Flipping only that field
+                // proves the page repaints from it rather than from the current setting.
+                await page.evaluate(async () => { __mock.state.alarmSilent = false; await window.refreshNative(true); });
+                assert.doesNotMatch(await page.locator('#alarm-root').innerText(), /静音模式/);
+                await page.evaluate(async () => { Object.assign(__mock.state, { alarmTest: true, alarmSilent: true }); await window.refreshNative(true); });
+                assert.match(await page.locator('.alarm-name').innerText(), /静音模式，本次不发声/);
+            });
+            await test('the test dialog warns that a test is silent too, and only while it is on', async () => {
+                await reset();
+                await page.evaluate(() => { __mock.state.config.silentUntil = Date.now() + 30 * 60000; return window.refreshNative(true); });
+                await page.locator('[data-action="testDialog"]').click(); await settle();
+                assert.match(await page.locator('#modal').innerText(), /这次测试也不会发声/);
+                await page.locator('#modal [data-action="closeModal"]').click();
+                await page.evaluate(() => { __mock.state.config.silentUntil = 0; return window.refreshNative(true); });
+                await page.locator('[data-action="testDialog"]').click(); await settle();
+                assert.doesNotMatch(await page.locator('#modal').innerText(), /这次测试也不会发声/);
+            });
+            // ---- high-frequency windows -----------------------------------------------------
+            // One switch, one extra rule list. The pace the loop keeps is decided natively; the page
+            // may only carry the choice over and never guess a pace of its own.
+            await test('the home switch turns the fast pace on and the card follows the service', async () => {
+                await reset();
+                const card = page.locator('[data-high-card]');
+                assert.match(await card.innerText(), /高频时段检测/);
+                assert.match(await card.innerText(), /关闭中 · 全天每 30 秒一次/);
+                await page.evaluate(() => { __mock.lastSave = null; });
+                await page.locator('[data-high-card] [data-toggle="highFrequency"]').click(); await settle();
+                const saved = await page.evaluate(() => __mock.lastSave);
+                assert.equal(saved.highFrequency, true, 'the switch is the option itself');
+                assert.equal(saved.windows, undefined, 'switching the pace must not rewrite the reminder windows');
+                assert.match(await card.innerText(), /08:00–12:00/);
+                assert.match(await card.innerText(), /20:00–00:00/);
+                // Which pace is in force right now is the service's answer, not the page's arithmetic.
+                await page.evaluate(() => { __mock.state.highInside = true; __mock.state.highNextBoundary = Date.now() + 3600000; return window.refreshNative(true); });
+                assert.match(await card.innerText(), /高频时段内 · 每 30 秒一次/);
+                await page.evaluate(() => { __mock.state.highInside = false; __mock.state.pollSecondsNow = 120; return window.refreshNative(true); });
+                assert.match(await card.innerText(), /低频时段 · 每 2 分钟一次/);
+                assert.match(await page.locator('.metric').nth(2).innerText(), /120/, 'the pace metric shows the interval actually in force');
+            });
+            await test('the high-frequency windows use the same editor, into their own list', async () => {
+                await reset('schedule');
+                const highEdits = page.locator('button[data-edit-rule][data-rule-target="high"]');
+                assert.equal(await highEdits.count(), 3, 'the three default windows are listed on the 时段 page');
+                await page.evaluate(() => { __mock.lastSave = null; });
+                await page.locator('[data-rule-toggle][data-rule-target="high"]').first().click(); await settle();
+                const toggled = await page.evaluate(() => __mock.lastSave);
+                assert.equal(toggled.windows, undefined, 'a high-frequency toggle must not rewrite the reminder windows');
+                assert.equal(toggled.highWindows.length, 3);
+                assert.equal(toggled.highWindows[0].enabled, false);
+                await page.evaluate(() => { __mock.lastSave = null; });
+                await highEdits.first().click(); await settle();
+                assert.match(await page.locator('#modal h2').innerText(), /编辑高频时段/);
+                assert.equal(await page.locator('#rule-start').inputValue(), '08:00');
+                assert.equal(await page.locator('#rule-end').inputValue(), '12:00');
+                await page.locator('#modal [data-action="saveRule"]').click(); await settle();
+                const edited = await page.evaluate(() => __mock.lastSave);
+                assert.equal(edited.allDay, undefined, 'editing a high-frequency window must not switch the reminder mode');
+                assert.equal(edited.windows, undefined);
+                assert.equal(edited.highWindows.length, 3);
+                // The ready-made evening chip keeps the 20:00-00:00 shape, i.e. end 0 = midnight.
+                await page.evaluate(() => { __mock.lastSave = null; });
+                await page.locator('[data-preset="highEvening"][data-rule-target="high"]').click(); await settle();
+                assert.equal(await page.locator('#rule-name').inputValue(), '晚间高频');
+                assert.equal(await page.locator('#rule-start').inputValue(), '20:00');
+                assert.equal(await page.locator('#rule-end').inputValue(), '00:00');
+                await page.locator('#modal [data-action="saveRule"]').click(); await settle();
+                const added = await page.evaluate(() => __mock.lastSave);
+                assert.equal(added.highWindows.length, 4);
+                const last = added.highWindows[added.highWindows.length - 1];
+                assert.equal(last.start, 1200);
+                assert.equal(last.end, 0, 'midnight is stored as 0, not 1440');
+                assert.equal(await page.locator('button[data-edit-rule][data-rule-target="high"]').count(), 4, 'the new window is on screen without a reload');
+            });
+            await test('the reminder windows still write their own list and switch to custom mode', async () => {
+                await reset('schedule');
+                await page.evaluate(() => { __mock.lastSave = null; });
+                await page.locator('button[data-edit-rule]:not([data-rule-target])').first().click(); await settle();
+                assert.match(await page.locator('#modal h2').innerText(), /编辑提醒时段/);
+                await page.locator('#modal [data-action="saveRule"]').click(); await settle();
+                const saved = await page.evaluate(() => __mock.lastSave);
+                assert.equal(saved.highWindows, undefined, 'a reminder edit must not touch the high-frequency list');
+                assert.equal(saved.allDay, false, 'editing a reminder window still switches the app to custom mode');
+                assert.equal(saved.windows.length, 1);
+            });
+            await test('a switched-on pace with no fast window says so out loud', async () => {
+                await reset('schedule');
+                await page.evaluate(() => {
+                    __mock.state.config.highFrequency = true;
+                    __mock.state.highInside = false;
+                    __mock.state.config.highWindows.forEach(w => { w.enabled = false; });
+                    return window.refreshNative(true);
+                });
+                const section = page.locator('section.card', { hasText: '高频时段检测' }).first();
+                assert.match(await section.innerText(), /没有启用中的高频时段/);
+                assert.match(await section.innerText(), /一直按每 2 分钟一次检测/);
             });
         console.log(`PASS: ${results.length} ${legacy ? 'original regression reproductions' : 'UI and bridge regression scenarios'}`);
         if (output) fs.writeFileSync(path.join(output, legacy ? 'original-regressions.json' : 'ui-regressions.json'), JSON.stringify({ legacy, results, errors }, null, 2));

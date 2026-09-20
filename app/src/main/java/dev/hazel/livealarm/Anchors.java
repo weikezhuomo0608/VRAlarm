@@ -12,19 +12,52 @@ public final class Anchors {
     public static final String DEFAULT_NAME="灰泽满 Hazel";
     public static final long DEFAULT_UID=1298779265L, DEFAULT_ROOM=1713546334L;
 
+    /**
+     * The uid is carried in two shapes on purpose. {@code uid} is the long that lookups and the
+     * storage format have always used; {@code uidText} is the same number as decimal text, which
+     * is the only shape the web interface can read back without loss — JavaScript numbers stop
+     * being exact at 2^53-1 (9007199254740991) and Bilibili issues 16-digit uids up to
+     * 9999999999999999. Both are derived in one place so the two copies cannot disagree.
+     */
     public static final class Anchor {
         public final String id, name;
         public final long uid, room;
+        /** The uid as decimal text: exact where {@code uid} cannot survive a JSON round trip. */
+        public final String uidText;
         public final boolean enabled;
         /** Silencing the bell keeps detection, the timeline and the records running. */
         public final boolean alarm;
         public Anchor(String id, String name, long uid, long room, boolean enabled) { this(id, name, uid, room, enabled, true); }
         public Anchor(String id, String name, long uid, long room, boolean enabled, boolean alarm) {
-            this.id=id; this.name=name; this.uid=uid; this.room=room; this.enabled=enabled; this.alarm=alarm;
+            this(id, name, uid, room, enabled, alarm, null);
         }
-        public Anchor withEnabled(boolean value) { return new Anchor(id, name, uid, room, value, alarm); }
-        public Anchor withAlarm(boolean value) { return new Anchor(id, name, uid, room, enabled, value); }
+        /** For a caller that holds the uid only as text, which the web interface always does. */
+        public Anchor(String id, String name, String uidText, long room, boolean enabled, boolean alarm) {
+            this(id, name, parseUid(uidText), room, enabled, alarm, uidText);
+        }
+        private Anchor(String id, String name, long uid, long room, boolean enabled, boolean alarm, String uidText) {
+            this.id=id; this.name=name; this.uid=uid; this.room=room; this.enabled=enabled; this.alarm=alarm;
+            // Text like "007" or "+12" would leave the two copies disagreeing, so the long wins
+            // whenever it is usable and the raw text is only kept when there is no long at all.
+            this.uidText = uid>0 ? Long.toString(uid) : (uidText==null ? "" : uidText.trim());
+        }
+        public Anchor withEnabled(boolean value) { return new Anchor(id, name, uid, room, value, alarm, uidText); }
+        public Anchor withAlarm(boolean value) { return new Anchor(id, name, uid, room, enabled, value, uidText); }
     }
+
+    /**
+     * Parse a uid that arrived as text. Blank or non-numeric reads as 0, meaning "not set".
+     * A number too large for a long is clamped to the maximum rather than wrapped: a uid must
+     * never come out of here as a different account than the one that was typed.
+     */
+    public static long parseUid(String text) {
+        if (text==null) return 0;
+        String trimmed=text.trim();
+        if (trimmed.isEmpty()) return 0;
+        for (int i=0;i<trimmed.length();i++) if (trimmed.charAt(i)<'0'||trimmed.charAt(i)>'9') return 0;
+        try { return Long.parseLong(trimmed); } catch (NumberFormatException e) { return Long.MAX_VALUE; }
+    }
+
 
     private Anchors() {}
 

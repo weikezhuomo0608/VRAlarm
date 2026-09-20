@@ -1,6 +1,6 @@
 {
   "name": "manqu-alarm-ui",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "private": true,
   "scripts": {
     "build:ui": "node tools/build_ui.cjs",

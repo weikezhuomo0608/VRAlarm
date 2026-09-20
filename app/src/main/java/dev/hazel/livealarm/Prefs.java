@@ -10,6 +10,16 @@ public final class Prefs {
     public Prefs(Context c){db=c.getSharedPreferences("hazel",Context.MODE_PRIVATE);}
     public SharedPreferences raw(){return db;}
     public static void put(JSONObject j,String key,Object value){try{j.put(key,value);}catch(JSONException e){throw new IllegalArgumentException(e);}}
+    /**
+     * Read a stored uid, preferring the exact decimal text over the long. The text is the only
+     * lossless copy: a 16-digit uid read back as a long and re-sent through JSON becomes a
+     * double in the web interface, which silently rounds it past 2^53-1. Entries written by
+     * older builds have no text, so the long is the fallback rather than the exception.
+     */
+    public static String uidOf(JSONObject o){
+        String text=o==null?"":o.optString("uidText","").trim();
+        return text.isEmpty()?Long.toString(o.optLong("uid")):text;
+    }
     public static JSONObject obj(String s){try{return new JSONObject(s);}catch(Exception e){return new JSONObject();}}
     public static JSONArray array(String s){try{return new JSONArray(s);}catch(Exception e){return new JSONArray();}}
     public JSONObject defaults(){
@@ -22,9 +32,27 @@ public final class Prefs {
         put(j,"preStream",true); put(j,"ringQueue",false); put(j,"aiOcr",true); put(j,"aiKey",""); put(j,"aiModel","deepseek-flash");
         put(j,"turbo",true); put(j,"seedColor",""); put(j,"amoled",false); put(j,"hideRecents",false); put(j,"recovery",true); put(j,"backgroundDim",40); put(j,"cardOpacity",94);
         put(j,"pet",true); put(j,"petCharacter","manqu");
+        // Silent mode is stored as a deadline rather than a switch, so a mode left on for a meeting
+        // ends by itself instead of swallowing the next stream. OFF is 0.
+        put(j,"silentUntil",QuietMode.OFF);
+        // High-frequency windows: the configured pace inside them, the slow floor outside. Off by
+        // default, so upgrading changes nobody's pace. The three defaults are the hours the user
+        // named (08:00-12:00, 14:00-16:00, 20:00-00:00) and stay editable.
+        put(j,"highFrequency",false);
+        JSONArray high=new JSONArray();
+        high.put(highWindow("h1","上午高频",480,720));
+        high.put(highWindow("h2","下午高频",840,960));
+        high.put(highWindow("h3","晚间高频",1200,0));
+        put(j,"highWindows",high);
                 JSONArray rules=new JSONArray(); JSONObject w=new JSONObject();
         put(w,"id","night");put(w,"name","凌晨守候");put(w,"start",60);put(w,"end",360);put(w,"days",127);put(w,"enabled",true);
         rules.put(w);put(j,"windows",rules);return j;
+    }
+    /** A default high-frequency window: every day, switched on. Times are minutes since midnight. */
+    private static JSONObject highWindow(String id,String name,int start,int end){
+        JSONObject w=new JSONObject();
+        put(w,"id",id);put(w,"name",name);put(w,"start",start);put(w,"end",end);put(w,"days",127);put(w,"enabled",true);
+        return w;
     }
     public synchronized JSONObject config(){
         JSONObject base=defaults(), saved=obj(db.getString("config","{}"));
@@ -33,7 +61,7 @@ public final class Prefs {
     }
     public synchronized void update(JSONObject patch) throws JSONException {
         JSONObject j=config();
-        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery","turbo","pet"};
+        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery","turbo","pet","highFrequency"};
         for(String k:bools) if(patch.has(k)){if(!(patch.get(k) instanceof Boolean))throw new JSONException("开关值无效");put(j,k,patch.getBoolean(k));}
         intSetting(j,patch,"volume",1,100);intSetting(j,patch,"backgroundDim",0,90);intSetting(j,patch,"cardOpacity",75,100);
         if(patch.has("seedColor")){String color=patch.getString("seedColor").trim();if(!color.isEmpty()&&!color.matches("#[0-9a-fA-F]{6}"))throw new JSONException("请输入六位 HEX 颜色，如 #536B81");put(j,"seedColor",color.toUpperCase(java.util.Locale.ROOT));}
@@ -42,32 +70,47 @@ public final class Prefs {
         if(patch.has("timezone")){String zone=patch.getString("timezone");try{TimeRules.zone(zone);}catch(Exception e){throw new JSONException("时区无效");}put(j,"timezone",zone);}
         if(patch.has("aiKey")){String v=patch.getString("aiKey").trim();put(j,"aiKey",v.length()>300?"":v);}
         if(patch.has("aiModel")){String v=patch.getString("aiModel").trim();if(v.isEmpty()||v.length()>80)throw new JSONException("模型名无效");put(j,"aiModel",v);}
+        // The page picks a duration, never a deadline: the clock that decides when silence ends is
+        // the one the ringing side reads, so only this call writes it.
+        if(patch.has("silentMinutes")){
+            int minutes=patch.getInt("silentMinutes");
+            if(!QuietMode.offered(minutes))throw new JSONException("静音时长无效");
+            put(j,"silentUntil",QuietMode.until(System.currentTimeMillis(),minutes));
+        }
         if(patch.has("theme")){String v=patch.getString("theme");if(!Arrays.asList("light","dark","system").contains(v))throw new JSONException("主题无效");put(j,"theme",v);}
                 if(patch.has("petCharacter")){String v=patch.getString("petCharacter");if(!Arrays.asList("manqu","lvdong").contains(v))throw new JSONException("宠物角色无效");put(j,"petCharacter",v);}
         if(patch.has("ringtone")){String v=patch.getString("ringtone");if(!Arrays.asList("starlight","morning","urgent","system","custom").contains(v))throw new JSONException("铃声无效");if("custom".equals(v)&&db.getString("customPath","").isEmpty())throw new JSONException("请先导入音频文件");put(j,"ringtone",v);}
-        if(patch.has("windows")){
-            JSONArray a=patch.getJSONArray("windows");if(a.length()>32)throw new JSONException("最多支持 32 个时段");
-            JSONArray cleaned=new JSONArray();Set<String> ids=new HashSet<>();
-            for(int i=0;i<a.length();i++){
-                JSONObject w=a.getJSONObject(i);int start=w.getInt("start"),end=w.getInt("end"),days=w.getInt("days");
-                String id=w.optString("id",UUID.randomUUID().toString()),name=w.optString("name","自定义时段");
-                if(id.length()>80||ids.contains(id))throw new JSONException("时段编号无效");ids.add(id);
-                if(name.length()>24)throw new JSONException("时段名称最多 24 个字");
-                try{new TimeRules.Window(id,name,start,end,days,w.optBoolean("enabled",true));}catch(Exception e){throw new JSONException(e.getMessage());}
-                JSONObject out=new JSONObject();put(out,"id",id);put(out,"name",name);put(out,"start",start);put(out,"end",end);put(out,"days",days);put(out,"enabled",w.optBoolean("enabled",true));cleaned.put(out);
-            }
-            put(j,"windows",cleaned);
-        }
+        if(patch.has("windows"))put(j,"windows",cleanWindows(patch.getJSONArray("windows")));
+        // The high-frequency windows are the same model as the reminder windows and take the same
+        // validation; only the "at least one rule" requirement below is specific to the reminder
+        // ones (no high-frequency window means the slow pace everywhere, which is not an error).
+        if(patch.has("highWindows"))put(j,"highWindows",cleanWindows(patch.getJSONArray("highWindows")));
         if(!j.optBoolean("allDay")){
             boolean any=false;JSONArray a=j.optJSONArray("windows");for(int i=0;i<a.length();i++)if(a.optJSONObject(i).optBoolean("enabled"))any=true;
             if(!any)throw new JSONException("请至少启用一个提醒时段，或选择全天提醒");
         }
         db.edit().putString("config",j.toString()).commit();
     }
+    /** Validate and copy a rule list, whichever list it is: ids unique, names short, times legal. */
+    private static JSONArray cleanWindows(JSONArray a)throws JSONException{
+        if(a.length()>32)throw new JSONException("最多支持 32 个时段");
+        JSONArray cleaned=new JSONArray();Set<String> ids=new HashSet<>();
+        for(int i=0;i<a.length();i++){
+            JSONObject w=a.getJSONObject(i);int start=w.getInt("start"),end=w.getInt("end"),days=w.getInt("days");
+            String id=w.optString("id",UUID.randomUUID().toString()),name=w.optString("name","自定义时段");
+            if(id.length()>80||ids.contains(id))throw new JSONException("时段编号无效");ids.add(id);
+            if(name.length()>24)throw new JSONException("时段名称最多 24 个字");
+            try{new TimeRules.Window(id,name,start,end,days,w.optBoolean("enabled",true));}catch(Exception e){throw new JSONException(e.getMessage());}
+            JSONObject out=new JSONObject();put(out,"id",id);put(out,"name",name);put(out,"start",start);put(out,"end",end);put(out,"days",days);put(out,"enabled",w.optBoolean("enabled",true));cleaned.put(out);
+        }
+        return cleaned;
+    }
     private void intSetting(JSONObject j,JSONObject p,String k,int min,int max)throws JSONException{if(p.has(k)){int v=p.getInt(k);if(v<min||v>max)throw new JSONException("数值超出范围");put(j,k,v);}}
     private void choiceInt(JSONObject j,JSONObject p,String k,int[] choices)throws JSONException{if(p.has(k)){int v=p.getInt(k);for(int a:choices)if(a==v){put(j,k,v);return;}throw new JSONException("选项无效");}}
-    public List<TimeRules.Window> windows(JSONObject config){
-        ArrayList<TimeRules.Window> list=new ArrayList<>();JSONArray a=config.optJSONArray("windows");if(a==null)return list;
+    public List<TimeRules.Window> windows(JSONObject config){return windows(config,"windows");}
+    /** The same reader for the high-frequency windows, which are the same kind of rule. */
+    public List<TimeRules.Window> windows(JSONObject config,String key){
+        ArrayList<TimeRules.Window> list=new ArrayList<>();JSONArray a=config.optJSONArray(key);if(a==null)return list;
         for(int i=0;i<a.length();i++){JSONObject w=a.optJSONObject(i);try{list.add(new TimeRules.Window(w.optString("id"),w.optString("name"),w.optInt("start"),w.optInt("end"),w.optInt("days"),w.optBoolean("enabled")));}catch(Exception ignored){}}
         return list;
     }
@@ -87,6 +130,23 @@ public final class Prefs {
         boolean inside=TimeRules.contains(now,allDay,windows,TimeRules.zone(c.optString("timezone")));
         return PollPlan.duty(enabled(),allDay,TimeRules.hasWindow(windows),inside)==PollPlan.Duty.WATCHING;
     }
+    /**
+     * Whether the pace right now is the fast one: the option is switched on AND the moment falls
+     * inside one of the high-frequency windows. Those windows are ordinary TimeRules windows, so
+     * weekdays, cross-midnight and the chosen zone all come from the same tested code as the
+     * reminder windows. With the option off this is false without touching the rule list at all.
+     */
+    public boolean highFrequencyNow(){return highFrequency(config());}
+    public boolean highFrequency(JSONObject c){
+        if(!c.optBoolean("highFrequency",false))return false;
+        return TimeRules.contains(System.currentTimeMillis(),false,windows(c,"highWindows"),TimeRules.zone(c.optString("timezone")));
+    }
+    /** The interval the poll loop should plan for at this moment. See PollPlan.effectivePollSeconds. */
+    public int pollSecondsNow(){return pollSeconds(config());}
+    public int pollSeconds(JSONObject c){
+        return PollPlan.effectivePollSeconds(c.optInt("pollSeconds",30),c.optBoolean("highFrequency",false),highFrequency(c));
+    }
+
     public boolean enabled(){return db.getBoolean("enabled",false);}
     public synchronized void setEnabled(boolean value){
         SharedPreferences.Editor e=db.edit().putBoolean("enabled",value);
@@ -105,7 +165,7 @@ public final class Prefs {
             JSONArray a=new JSONArray(text);
             for(int i=0;i<a.length();i++){
                 JSONObject o=a.optJSONObject(i);if(o==null)continue;
-                list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),o.optLong("uid"),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true)));
+                list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),uidOf(o),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true)));
             }
         }catch(Exception e){return new ArrayList<>();}
         return list;
@@ -113,7 +173,7 @@ public final class Prefs {
     public synchronized void saveAnchors(List<Anchors.Anchor> list){
         Anchors.validate(list);
         JSONArray a=new JSONArray();
-        for(Anchors.Anchor x:list){JSONObject o=new JSONObject();put(o,"id",x.id);put(o,"name",x.name);put(o,"uid",x.uid);put(o,"room",x.room);put(o,"enabled",x.enabled);put(o,"alarm",x.alarm);a.put(o);}
+        for(Anchors.Anchor x:list){JSONObject o=new JSONObject();put(o,"id",x.id);put(o,"name",x.name);put(o,"uid",x.uid);put(o,"uidText",x.uidText);put(o,"room",x.room);put(o,"enabled",x.enabled);put(o,"alarm",x.alarm);a.put(o);}
         db.edit().putString("anchors",a.toString()).commit();
     }
     public Anchors.Anchor anchor(String id){return Anchors.find(anchors(),id);}

@@ -57,6 +57,8 @@ python3 tools/build_apk.py \
 
 默认使用 `javac`；只有 JRE 时可附加 `--ecj /path/to/ecj-3.39.0.jar`。流程依次执行 AAPT2、Java 编译、D8、zipalign 和 apksigner。密钥别名必须与密钥库里实际的别名一致（用 `keytool -list -keystore <文件> -storetype PKCS12` 查看），否则签名会以 `does not contain a key` 失败。
 
+脚本开始时会清空 `build/manual/` 下的中间产物（`classes`、`gen`、`dex`、`resources.*`、`classes.jar`、`unsigned.apk`、`aligned.apk`）。在会拦截批量删除的环境里这一步可能被中止，构建尚未开始就退出；先手动执行 `node tools/clear_build.js` 清一遍即可，它清空的正是同一批路径。
+
 原发布密钥不在仓库或公开发行附件中。自己生成的密钥不能用于覆盖原签名版本。修改版本时同步调整 `app/build.gradle`、`package.json`、`tools/build_apk.py` 的默认版本及发布说明。
 
 ## Java 规则测试

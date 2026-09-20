@@ -56,6 +56,14 @@ public class CoreTests {
         check(!LiveGate.observe(s,true,before,before,before-60000,false,hours).ring,"start outside window");check(!LiveGate.observe(s,true,before,after,before-60000,false,hours).ring,"strict window entry no catchup");check(LiveGate.observe(s,true,before,after,before-60000,true,hours).ring,"opt-in window entry catchup");
         s=new LiveGate.State();check(LiveGate.observe(s,true,now-10000,now,armed,false,hours).ring,"new live during allowed hours");
         s.notified=s.session;s.baseline=true;check(!LiveGate.observe(s,true,now-10000,now+30000,now+10000,true,hours).ring,"restart retains dedup");
+        // The default high-frequency windows as the app ships them: 08:00-12:00, 14:00-16:00 and
+        // 20:00-00:00. The last one ends exactly at midnight, so it is the end==0 edge in practice.
+        TimeRules.Window highMorning=w(480,720,127),highAfternoon=w(840,960,127),highEvening=w(1200,0,127);
+        check(inside("2026-09-07T09:00:00",highMorning,highAfternoon,highEvening),"mid-morning is a fast window");
+        check(!inside("2026-09-07T13:00:00",highMorning,highAfternoon,highEvening),"the lunch gap is not");
+        check(inside("2026-09-07T23:30:00",highMorning,highAfternoon,highEvening),"the evening window runs up to midnight");
+        check(!inside("2026-09-08T00:30:00",highMorning,highAfternoon,highEvening),"and stops exactly at midnight");
+        check(!inside("2026-09-07T07:59:00",highMorning,highAfternoon,highEvening),"the morning window starts at 08:00 sharp");
         System.out.println("PASS: "+count+" schedule and broadcast-state assertions");
     }
 }

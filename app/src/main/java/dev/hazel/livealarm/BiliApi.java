@@ -50,26 +50,34 @@ public final class BiliApi {
      * Turn a typed room number into a stored anchor. The room is canonicalised first, so a
      * short id still passes the identity check in parse(). Name and picture are best effort.
      */
-    /** The live room of one user id, so a pasted space link can be added like a room link. */
+    /**
+     * The live room of one user id, so a pasted space link can be added like a room link.
+     * Two endpoints are asked, because neither one alone covers every account: the live_user
+     * endpoint publishes room_id for anchors but is refused for some uids, while the space
+     * endpoint still answers for them with its own copy of the room id.
+     */
     public static long roomOfUid(long uid)throws IOException{
+        IOException failure=null;
         try{
             JSONObject d=request("https://api.live.bilibili.com/live_user/v1/Master/info?uid="+uid,"https://space.bilibili.com/"+uid);
             // The live room is published at data.room_id; the nested data.info object only holds
             // the user profile and has no room_id. Reading info.room_id made every uid look like
             // an account without a live room.
             long room=d.optLong("room_id",0);
-            if(room<=0){
-                JSONObject info=d.optJSONObject("info");
-                room=info==null?0:info.optLong("room_id",0);
-            }
-            if(room<=0)throw new ApiException("这个 UID 还没有开通直播间，请改用直播间链接",false);
-            return room;
-        }catch(ApiException e){
-            if(e.rateLimited)throw e;
-            String message=e.getMessage();
-            if(message!=null&&(message.startsWith("B 站接口")||message.startsWith("B 站暂时")))throw new ApiException("没有找到这个账号的直播间，请改用直播间号码或直播间链接",false);
-            throw e;
-        }
+            if(room>0)return room;
+            failure=new ApiException("这个 UID 还没有开通直播间，请改用直播间链接",false);
+        }catch(ApiException e){if(e.rateLimited)throw e;failure=e;}
+        catch(IOException e){failure=e;}
+        try{
+            JSONObject card=request("https://api.bilibili.com/x/web-interface/card?mid="+uid,"https://space.bilibili.com/"+uid);
+            long room=card.optJSONObject("live")==null?0:card.optJSONObject("live").optLong("roomid",0);
+            if(room>0)return room;
+            failure=new ApiException("这个 UID 还没有开通直播间，请改用直播间链接",false);
+        }catch(ApiException e){if(e.rateLimited)throw e;failure=e;}
+        catch(IOException e){failure=e;}
+        String message=failure==null?null:failure.getMessage();
+        if(message!=null&&(message.startsWith("B 站接口")||message.startsWith("B 站暂时")))throw new ApiException("没有找到这个账号的直播间，请改用直播间号码或直播间链接",false);
+        throw failure==null?new ApiException("没有找到这个账号的直播间，请改用直播间号码或直播间链接",false):failure;
     }
     public static Profile resolve(long room)throws IOException{
         String referer="https://live.bilibili.com/"+room;
@@ -84,6 +92,9 @@ public final class BiliApi {
         p.uid=init.optLong("uid",0);
         p.room=init.optLong("room_id",0);
         if(p.room<=0)p.room=room;
+        // room_init publishes the owner as uid; the live-status endpoint reports the same account
+        // as uid under some responses and as mid under others, so both spellings are accepted.
+        if(p.uid<=0)p.uid=init.optLong("mid",0);
         if(p.uid<=0)throw new ApiException("没有找到这个直播间，请检查房间号",false);
         try{
             JSONObject d=request("https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room?roomid="+p.room,"https://live.bilibili.com/"+p.room);
@@ -121,16 +132,23 @@ public final class BiliApi {
             return bytes.toByteArray();
         }finally{c.disconnect();}
     }
-    /** The avatar URL of an already-canonical room: one request, for the bulk avatar refresh. */
+    /**
+     * The avatar URL of an already-canonical room: one request, for the bulk avatar refresh.
+     * The room-info endpoint carries the same icon and, unlike the anchor-in-room endpoint,
+     * answers for every room, so a refresh stops leaving anchors without a picture.
+     */
     public static String anchorFace(long room)throws IOException{
+        String referer="https://live.bilibili.com/"+room;
         try{
-            JSONObject d=request("https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room?roomid="+room,"https://live.bilibili.com/"+room);
+            JSONObject d=request("https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room?roomid="+room,referer);
             JSONObject info=d.optJSONObject("info");
-            return info==null?"":info.optString("face","");
+            String face=info==null?"":info.optString("face","");
+            if(!face.isEmpty())return face;
         }catch(ApiException e){
             if(e.rateLimited)throw e;
-            return "";
-        }
+        }catch(IOException ignored){}
+        JSONObject d=request("https://api.live.bilibili.com/room/v1/Room/get_info?room_id="+room,referer);
+        return d.optString("user_cover","");
     }
 
     private JSONObject request(String address)throws IOException{return request(address,"https://live.bilibili.com/"+room);}

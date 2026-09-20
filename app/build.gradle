@@ -4,7 +4,7 @@ android {
     compileSdk 35
     // A distinct applicationId makes this a separate app: it installs alongside the
     // single-anchor release instead of failing on its signature, and keeps its own settings.
-    defaultConfig { applicationId 'dev.hazel.livealarm.multi'; minSdk 26; targetSdk 35; versionCode 40; versionName '1.1.8' }
+    defaultConfig { applicationId 'dev.hazel.livealarm.multi'; minSdk 26; targetSdk 35; versionCode 41; versionName '1.1.9' }
     buildTypes { release { minifyEnabled false } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
 }

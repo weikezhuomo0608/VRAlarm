@@ -120,6 +120,25 @@ public final class PollPlanTests {
         check(PollPlan.keepAliveSeconds(1,true,true)>=PollPlan.MIN_TURBO_NET_SECONDS,"the continuous net cannot become a hot loop");
         check(PollPlan.keepAliveSeconds(30,true,true)<=PollPlan.MAX_BACKOFF_SECONDS,"the continuous net stays inside the doze floor's neighbourhood");
 
+        // High-frequency windows: the configured pace inside them, the slow floor outside, and
+        // nothing at all when the option is off.
+        check(PollPlan.effectivePollSeconds(30,false,false)==30,"with the option off the pace never changes");
+        check(PollPlan.effectivePollSeconds(30,false,true)==30,"with the option off a window changes nothing either");
+        check(PollPlan.effectivePollSeconds(30,true,true)==30,"inside a high-frequency window the configured pace is kept");
+        check(PollPlan.effectivePollSeconds(30,true,false)==PollPlan.LOW_FREQUENCY_SECONDS,"outside them the pace drops to the slow floor");
+        check(PollPlan.effectivePollSeconds(15,true,false)==120,"a fifteen-second setting is slowed down to two minutes");
+        check(PollPlan.effectivePollSeconds(60,true,false)==120,"a one-minute setting is slowed down to two minutes");
+        check(PollPlan.effectivePollSeconds(120,true,false)==120,"a two-minute setting is already the floor");
+        check(PollPlan.effectivePollSeconds(300,true,false)==300,"a pace slower than the floor is never sped up");
+        check(PollPlan.LOW_FREQUENCY_SECONDS>PollPlan.MIN_GAP_SECONDS,"the slow floor is an interval, not the safety minimum");
+        // A slowed cycle must still be far below the interruption floor, or every slow hour would be
+        // reported as the watch having been interrupted.
+        check(PollPlan.LOW_FREQUENCY_SECONDS*1000L<PollPlan.INTERRUPTION_FLOOR_MS,"a slow pace cannot look like an interruption");
+        check(PollPlan.gapSeconds(PollPlan.effectivePollSeconds(15,true,false),true,0)==120,"an effective slow pace produces a two-minute gap");
+        check(PollPlan.gapSeconds(PollPlan.effectivePollSeconds(15,true,true),true,0)==15,"an effective fast pace produces the configured gap");
+        check(PollPlan.keepAliveSeconds(120,true,true)>PollPlan.LOW_FREQUENCY_SECONDS,"the net still fires after the slow cycle it guards");
+        check(PollPlan.keepAliveSeconds(120,true,true)<=PollPlan.MAX_BACKOFF_SECONDS,"the slow net stays inside the doze neighbourhood");
+        check(PollPlan.backoffSeconds(120,true,1)==120,"the failure ladder starts from the effective pace, not the configured one");
         System.out.println("PASS: "+count+" poll cycle timing assertions");
     }
 }

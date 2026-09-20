@@ -1,6 +1,29 @@
-> 对外发布版：**1.1.0808（满区版，安装包内 1.1.8）** = 含桌面小宠物；更早的 1.1.6 是去掉了小宠物的过渡版本。公开版号自 1.1.0 起（=内部 1.4.3），下文出现的 1.1.x–1.4.x 多为开发期内部版本号。宠物的提取/烘焙工具（`tools/make_pet_from_screenshot.py`、`tools/bake_pet_art.py` 等）与源截图属本机内部工具，未随仓库发布，故下文提到它们时只作历史记录。
+> 对外发布版：**1.1.0808（满区版，安装包内 1.1.8）** = 含桌面小宠物；更早的 1.1.6 是去掉了小宠物的过渡版本。**当前版本 1.1.9（静音模式 · 高频时段检测，已发布）**，其验证见下方 1.1.9 两节。公开版号自 1.1.0 起（=内部 1.4.3），下文出现的 1.1.x–1.4.x 多为开发期内部版本号。宠物的提取/烘焙工具（`tools/make_pet_from_screenshot.py`、`tools/bake_pet_art.py` 等）与源截图属本机内部工具，未随仓库发布，故下文提到它们时只作历史记录。
 
 # 验证范围
+
+### 1.1.9 增补（高频时段检测，版本号不变）
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 界面回归 | **84** 个场景通过 | 新增 4 个：首页开关只写 `highFrequency`（**不得改写提醒时段**）、状态行跟随服务读数（「高频时段内 · 每 30 秒一次」／「低频时段 · 每 2 分钟一次」）、时段页三张默认高频卡与编辑弹窗（标题、08:00–12:00 预填、保存只写 `highWindows` 且**不切 allDay**）、一键添加「晚间 20:00–00:00」存成 `start=1200/end=0`；另加一条护栏「提醒时段仍写自己的表并切到自定义模式」，防止共用编辑器改坏老流程 |
+| 规则内核断言 | 36,046 + 12 + 16 + 68 + **127** + 20 + 13 + 24 条通过 | `PollPlan.effectivePollSeconds` 新增 15 条（关闭时不变、窗口内保持、窗口外放慢、比 2 分钟更慢的不提速、放慢后仍远低于「守候被中断」门槛、保活网仍晚于它守护的周期、退避基数取有效值）；默认高频时段的窗口边界 5 条（含 20:00–00:00 恰在午夜结束、08:00 整点进入） |
+| 版式目视检查 | 通过 | `build/shot-pace-home-inside/outside.png`（首页卡「高频中／低频中」两态）、`build/shot-pace-section.png`（时段页高频段：开关、时间轴、三张卡片）、整页 `build/shot-pace-schedule.png`；脚本 `tests/_quietshot.cjs` 可重跑 |
+| 轮询链路复核 | 通过 | 有效间隔的四个使用点逐一核对：无启用主播、本轮失败、一轮结束、`scheduleNext()` 的退避基数；`statusText()` 的通知文案同源。保活与 Doze 兜底网由 `scheduleNext(seconds)` 从**同一个数字**派生，未出现漂移 |
+| APK 编译与签名 | 通过 | `build/VRAlarm-1.1.9.apk` 重建，仍为 `versionCode=41`、`versionName=1.1.9`，应用名「VR闹钟」，apksigner v2/v3 校验通过 |
+
+**尚未真机验证**：真机上一整天的高／低频切换是否按点发生（含跨午夜 20:00–00:00 收档）、低频时段的实际耗电改善幅度。
+
+## 1.1.9（静音模式）
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 界面回归 | **80** 个场景通过 | 新增 4 个：静音时长以「时长」而不是「到期时刻」过桥（页面不得自己算时间，落库后剩余 30 分钟）、到期后自动不再静音且首页显示剩余时间／手动恢复与一键关闭、全屏提醒页写明本次不发声（**只翻转该字段**也会重绘）、响铃测试弹窗只在静音期间提示 |
+| 规则内核断言 | 36,041 + 12 + 16 + 68 + 112 + 20 + 13 + **24** 条通过 | 新增 `QuietModeTests` 24 条：到期即失效（到期前 1 毫秒仍静音、到期时刻已不算）、三档时长边界、手动恢复无倒计时、时长白名单以外的值被拒、重启后按原到期时刻继续倒计时 |
+| 版式目视检查 | 通过 | `build/shot-quiet-sound-off/on.png`（声音页静音区）、`build/shot-quiet-home-on/manual.png`（首页倒计时卡与手动恢复）、`build/shot-quiet-alarm-silent/normal.png`（全屏提醒页）；脚本 `tests/_quietshot.cjs` 可重跑（本机内部工具，与宠物提取工具一样不入库） |
+| APK 编译与签名 | 通过 | `build/VRAlarm-1.1.9.apk`，`versionCode=41`、`versionName=1.1.9`，应用名「VR闹钟」，apksigner v2/v3 校验通过；包内 `app.js` 含静音模式产物（`silentMinutes` 存在） |
+
+**尚未真机验证**：静音期间真机确实不发声、不振动（含锁屏与免打扰下的表现）；静音到点自动恢复的观感；从旧版覆盖升级后 `silentUntil` 默认为 0（关）的迁移表现。
 
 ## 1.1.0808（满区版）
 
@@ -23,25 +46,34 @@
 | 界面回归 | **71** 个场景通过 | 新增「outside the schedule the watch is paused, never interrupted」：暂停时**不出现**中断红卡、给出恢复时刻、无启用时段时改为配置提示、时段页同步说明；既有「服务已中断」三态场景保持通过 |
 | 版式目视检查 | 通过 | `build/shot-pause-outside.png`（时段外暂停 + 恢复时刻）、`build/shot-pause-schedule-page.png`（时段页说明与空时段警告）；脚本 `tests/shot-watch.cjs` 可重跑 |
 | 拉起入口全查 | 通过 | `grep watchingNow()` 覆盖 8 个可能自动拉起守候的入口（服务三处、保活、看门狗、恢复检查、无障碍、开机、界面 onResume、小组件）；Java 31 文件配平 |
-| APK 编译与签名 | 通过 | `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `d72d5945…`），`versionCode=40`／`versionName=1.1.8`／label「VR闹钟」，dex 内已含 `schedPaused`、`watchingNow` 与新文案 |
+| APK 编译与签名 | 通过 | 当时为 `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `d72d5945…`），`versionCode=40`／`versionName=1.1.8`／label「VR闹钟」，dex 内已含 `schedPaused`、`watchingNow` 与新文案。**该包已被 2026-09-17 的修订三覆盖重建（依次为 `30f41bed…` → `69797ccc…` → `471cf16b…`），此行的哈希仅作历史记录** |
 
 **本次未验证**：真机上「进入时段自动恢复」的实际时点（依赖 `setAlarmClock` 与精确闹钟权限）；无「精确闹钟」权限时边界唤醒被系统推迟到约 9 分钟的表现；长时间暂停（跨夜）后前台服务能否被正常重新拉起。
 
+### 1.1.0808 修订三（2026-09-17：16 位 UID 无法添加 + UID 精度失真，版本号未变）
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 界面回归 | **76** 个场景通过 | 新增 4 个：「add-anchor: a 16-digit uid reaches the bridge as a uid and saves」填入 `3546729368520811` 点「识别主播信息」，要求桥收到 `{room:0, uid:'3546729368520811'}`（**字符串** UID 而非当成看不懂的内容）、名称自动填入、保存后 UID 与直播间都落库；「add-anchor: the largest 16-digit uid survives the round trip unrounded」用 `9999999999999999` 走完整链路，要求输入框、预览文本、落库记录**三处都还是 `9999999999999999`**，并**同时断言桥回传的数字副本确实已被舍入成 `10000000000000000`**（读到 `10000000000000000` 即证明页面读的是字符串副本，两个断言互相印证）；「a stored 16-digit uid survives the list, the edit form and both toggles」把库里存成 16 位 UID，要求主播列表、编辑弹窗的预览、以及「检测」「响铃」两个开关回存的 UID **全部仍是 `9999999999999999`**；「add-anchor: a 19-digit number is refused before it reaches the bridge」要求 19 位数字**一个字节都不发出**、只显示错误。另把两处旧用例（`adding an anchor resolves the uid before saving`、`pasting a live or space link resolves the anchor`）的断言从数字改为字符串 |
+| 根因核对 | 已定位（三处） | ① 位数上限过旧：前端「纯数字即 UID」的正则上限是 `\d{2,15}`，而 B 站新账号 UID 为 **16** 位，请求未发出即被拒。② **发送侧精度失真**：`Number.MAX_SAFE_INTEGER` 为 `9007199254740991`，而 16 位 UID 最大 `9999999999999999`，`Number('9999999999999999')` 会静默变成 `10000000000000000`。③ **回传侧精度失真**：原生回传的 `uid` 是 Java `long`，进入 JavaScript 变成双精度浮点，同样被舍入 —— 列表显示、编辑带出、开关回存三处都读到那个舍入值 |
+| 桥协议实测 | 通过 | 用真实 `org.json` 实现实测 `optLong` 对**字符串**数字的解析：`{"uid":"9999999999999999"}` → `9999999999999999`（精确）；空字符串 → `0`（「未传 UID」语义不变）；同一数值走 `Double` → `10000000000000000`（即要避免的失真）。据此确定方案为「入桥走字符串、回传带文本副本」 |
+| 位数上限依据 | 18 位 | 由 Java `long`（最大 19 位）反推：18 位（最大 `999999999999999`×10）安全，19 位会溢出，因此在**发请求之前**由前端拒绝 |
+| 接口实测 | 通过 | `curl` 直连确认：`live_user/v1/Master/info?uid=3546729368520811` 返回 `uname":"Vedal和Neuro-sama"`、`room_id":1852504554`；`x/web-interface/card?mid=…` 同样返回该账号（回退接口）；`room_init?id=3546729368520811` 报房间不存在（证实该值是 UID 而非房间号）；`x/web-interface/card` 对 `uid=2/2233/1000000000` 均 `code:0`，对 `10^10`～`10^13` 均 `code:-404` |
+| 规则内核断言 | 通过（锚点断言增加） | 36,041 + 12 + 16 + **68** + 112 + 20 + 13 条全过；`AnchorsTests` 由 51 增至 68，新增覆盖 `parseUid` 精确读取最大 16 位 UID、去空白、空/非数字/负数读作未设置、**超长数字被钳到 `Long.MAX_VALUE` 而不是回绕**、以及两个构造入口派生出的 `uidText` 与 `uid` 不可能不一致（含 `"007"` 这类填充值）。Java 31 文件配平 |
+| 兼容旧数据 | 通过 | 存储里没有 `uidText` 的旧记录由 `uid` 自动回退（`Prefs.uidOf`），读到后写回即自动补齐，**无需迁移脚本**；回传中没有 `uidText` 的旧包回复同样由页面回退到数字 |
+| APK 编译 | 通过 | `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `471cf16b…`），`versionCode=40`／`versionName=1.1.8`；已核对包内 `assets/app.js` 含 `MAX_UID_DIGITS = 18`、`readUid`（7 处引用），`classes.dex` 含 `uidText`、`parseUid` 与 `x/web-interface/card` 回退串 |
+
+**本次未验证**：真机上用 16 位 UID 完成一次「识别 → 保存 → 该主播开播响铃」的端到端流程；`x/web-interface/card` 回退在真实网络下的可用性（仅在本机 `curl` 验证过）；真机 WebView（老版本 Chromium）下 16 位 UID 的显示与存储（本机回归跑在本机 Chrome 上）。
+
+**已知限制**：无。16 位 UID 从输入、识别、存储、回读到列表显示与开关回存已全程精确。原先记录的「回传仍是数字」已在本修订内解决（原生侧每处回传增加 `uidText` 文本副本）。
+
 ### 1.1.0808 修订二（2026-09-16：记录页闪屏，版本号未变）
 
 | 验证 | 结果 | 范围 |
 | --- | --- | --- |
-| 界面回归 | **72** 个场景通过 | 新增「opening the records page paints it once, not twice」：用 MutationObserver 统计 `#content` 的绘制批次，40 条记录下要求**只画一次**、且**不出现「列表为空」的中间帧**。修复前实测 `batches=2, emptyBatches=1`（即用户看到的闪），修复后 `batches=1, emptyBatches=0` |
+| 界面回归 | 72 个场景通过 | 新增「opening the records page paints it once, not twice」：用 MutationObserver 统计 `#content` 的绘制批次，40 条记录下要求**只画一次**、且**不出现「列表为空」的中间帧**。修复前实测 `batches=2, emptyBatches=1`（即用户看到的闪），修复后 `batches=1, emptyBatches=0` |
 | 规则内核断言 | 未改动 Java | 本次只动界面脚本与界面测试；核心断言仍 36,041 + 12 + 16 + 51 + 112 + 20 + 13 条 |
-| APK 编译 | 通过 | `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `e641ca3c…`），`versionCode=40`／`versionName=1.1.8`／label「VR闹钟」，已核对包内界面含修复后的记录页 |
-
-### 1.1.0808 修订二（2026-09-16：记录页闪屏，版本号未变）
-
-| 验证 | 结果 | 范围 |
-| --- | --- | --- |
-| 界面回归 | **72** 个场景通过 | 新增「opening the records page paints it once, not twice」：用 MutationObserver 统计 `#content` 的绘制批次，40 条记录下要求**只画一次**、且**不出现「列表为空」的中间帧**。修复前实测 `batches=2, emptyBatches=1`（即用户看到的闪），修复后 `batches=1, emptyBatches=0` |
-| 规则内核断言 | 未改动 Java | 本次只动界面脚本与界面测试；核心断言仍 36,041 + 12 + 16 + 51 + 112 + 20 + 13 条 |
-| APK 编译 | 通过 | `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `e641ca3c…`），`versionCode=40`／`versionName=1.1.8`／label「VR闹钟」，已核对包内界面含修复后的记录页 |
+| APK 编译 | 通过 | 当时为 `build/VRAlarm-1.1.8.apk`（同号重建，sha256 `e641ca3c…`），`versionCode=40`／`versionName=1.1.8`／label「VR闹钟」，已核对包内界面含修复后的记录页。**该包已被 2026-09-17 的修订三覆盖重建（依次为 `30f41bed…` → `69797ccc…` → `471cf16b…`）** |
 
 ## 1.1.7（本地版：公开 1.1.6 + 桌面小宠物）
 

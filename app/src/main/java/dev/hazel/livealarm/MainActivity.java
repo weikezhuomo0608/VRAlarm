@@ -160,7 +160,7 @@ public class MainActivity extends Activity {
     private static final Object DEFERRED=new Object();
     private JSONObject state(){
         JSONObject j=new JSONObject();Prefs.put(j,"config",prefs.config());Prefs.put(j,"enabled",prefs.enabled());Prefs.put(j,"running",GuardianService.running);
-        Prefs.put(j,"ringing",GuardianService.ringing);Prefs.put(j,"alarmTest",prefs.raw().getBoolean("alarmTest",false));Prefs.put(j,"alarmTitle",prefs.raw().getString("alarmTitle",""));Prefs.put(j,"alarmAnchor",prefs.raw().getString("alarmAnchorName",""));Prefs.put(j,"alarmAnchorId",prefs.raw().getString("alarmAnchorId",""));Prefs.put(j,"alarmCover",prefs.snapshot(prefs.raw().getString("alarmAnchorId","")).optString("cover",""));Prefs.put(j,"alarmUntil",prefs.raw().getLong("alarmUntil",0));
+        Prefs.put(j,"ringing",GuardianService.ringing);Prefs.put(j,"alarmTest",prefs.raw().getBoolean("alarmTest",false));Prefs.put(j,"alarmTitle",prefs.raw().getString("alarmTitle",""));Prefs.put(j,"alarmAnchor",prefs.raw().getString("alarmAnchorName",""));Prefs.put(j,"alarmAnchorId",prefs.raw().getString("alarmAnchorId",""));Prefs.put(j,"alarmCover",prefs.snapshot(prefs.raw().getString("alarmAnchorId","")).optString("cover",""));Prefs.put(j,"alarmUntil",prefs.raw().getLong("alarmUntil",0));Prefs.put(j,"alarmSilent",prefs.raw().getBoolean("alarmSilent",false));
         Prefs.put(j,"snapshot",primarySnapshot());Prefs.put(j,"anchors",anchorStates());Prefs.put(j,"networkError",prefs.raw().getString("networkError",""));Prefs.put(j,"serviceError",prefs.raw().getString("serviceError",""));
         Prefs.put(j,"startError",prefs.raw().getString("startError",""));
         Prefs.put(j,"nextCheck",prefs.raw().getLong("nextCheck",0));Prefs.put(j,"serviceHeartbeatAt",prefs.raw().getLong("serviceHeartbeatAt",0));Prefs.put(j,"snoozeAt",prefs.raw().getLong("snoozeAt",0));Prefs.put(j,"testAt",prefs.raw().getLong("testAt",0));Prefs.put(j,"inside",prefs.allowed(System.currentTimeMillis()));
@@ -170,8 +170,14 @@ public class MainActivity extends Activity {
         // "custom mode with no rule switched on", which is paused forever rather than for a while.
         Prefs.put(j,"schedulePaused",prefs.enabled()&&!prefs.watchingNow());
         Prefs.put(j,"hasWindow",TimeRules.hasWindow(prefs.windows(prefs.config())));
+        // High-frequency windows: whether the fast pace is in force right now, and the interval
+        // itself. Both come from the same rule table the poll loop reads, so the page cannot show a
+        // pace the loop is not keeping.
+        Prefs.put(j,"highInside",prefs.highFrequencyNow());
+        Prefs.put(j,"pollSecondsNow",prefs.pollSecondsNow());
         JSONObject c=prefs.config();Prefs.put(j,"zone",TimeRules.zone(c.optString("timezone")).getId());Prefs.put(j,"deviceZone",ZoneId.systemDefault().getId());
         Prefs.put(j,"now",System.currentTimeMillis());Prefs.put(j,"nextBoundary",TimeRules.nextBoundary(System.currentTimeMillis(),c.optBoolean("allDay"),prefs.windows(c),TimeRules.zone(c.optString("timezone"))));
+        Prefs.put(j,"highNextBoundary",TimeRules.nextBoundary(System.currentTimeMillis(),false,prefs.windows(c,"highWindows"),TimeRules.zone(c.optString("timezone"))));
         Prefs.put(j,"permissions",permissions());Prefs.put(j,"permissionsCheckedAt",System.currentTimeMillis());
         Prefs.put(j,"notificationRequestResult",prefs.raw().getString("notificationRequestResult","not_requested"));
         Prefs.put(j,"notificationRequestAt",prefs.raw().getLong("notificationRequestAt",0));
@@ -192,7 +198,7 @@ public class MainActivity extends Activity {
     private String versionName(){
         try{String name=getPackageManager().getPackageInfo(getPackageName(),0).versionName;if(name!=null&&!name.isEmpty())return name;}
         catch(Exception ignored){}
-        return "1.1.8";
+        return "1.1.9";
     }
     private JSONObject permissions(){
         JSONObject p=new JSONObject();NotificationManager n=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
@@ -298,7 +304,7 @@ public class MainActivity extends Activity {
                     Object value;boolean ok=true;
                     try{
                         BiliApi.Profile found=BiliApi.resolve(requested>0?requested:BiliApi.roomOfUid(uid));
-                        JSONObject out=new JSONObject();Prefs.put(out,"id",anchorId);Prefs.put(out,"room",found.room);Prefs.put(out,"uid",found.uid);Prefs.put(out,"name",found.name);
+                        JSONObject out=new JSONObject();Prefs.put(out,"id",anchorId);Prefs.put(out,"room",found.room);Prefs.put(out,"uid",found.uid);Prefs.put(out,"uidText",Long.toString(found.uid));Prefs.put(out,"name",found.name);
                         Prefs.put(out,"avatar",downloadAvatar(anchorId,found.face));value=out;
                     }catch(Exception e){ok=false;value=errorText(e);}
                     final boolean succeeded=ok;final Object payload=value;
@@ -314,7 +320,7 @@ public class MainActivity extends Activity {
                 Anchors.Anchor previous=Anchors.find(prefs.anchors(),Anchors.validId(id)?id:"");
                 boolean alarm=o.has("alarm")?o.optBoolean("alarm",true):previous==null||previous.alarm;
                 Anchors.Anchor updated=new Anchors.Anchor(Anchors.validId(id)?id:UUID.randomUUID().toString(),
-                    Anchors.fitName(o.optString("name","")),o.optLong("uid",0),o.optLong("room",0),
+                    Anchors.fitName(o.optString("name","")),Prefs.uidOf(o),o.optLong("room",0),
                     o.optBoolean("enabled",true),alarm);
                 List<Anchors.Anchor> list=prefs.anchors();
                 int at=Anchors.findIndex(list,updated.id);
@@ -437,7 +443,7 @@ public class MainActivity extends Activity {
         JSONArray all=new JSONArray();
         for(Anchors.Anchor x:prefs.anchors()){
             JSONObject o=new JSONObject();
-            Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);
+            Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"uidText",x.uidText);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);
             Prefs.put(o,"alarm",x.alarm);
             Prefs.put(o,"snapshot",prefs.snapshot(x.id));Prefs.put(o,"avatar",AnchorArt.existing(this,x.id)!=null);
             Prefs.put(o,"schedule",scheduleEntries(prefs.schedule(x.id)));Prefs.put(o,"scheduleImage",AnchorArt.scheduleImage(this,x.id)!=null);Prefs.put(o,"scheduleImageRevision",AnchorArt.scheduleImageRevision(this,x.id));
@@ -453,7 +459,7 @@ public class MainActivity extends Activity {
     /** Definitions only: a backup carries the list, not the observation of the moment. */
     private JSONArray anchorList(){
         JSONArray all=new JSONArray();
-        for(Anchors.Anchor x:prefs.anchors()){JSONObject o=new JSONObject();Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);Prefs.put(o,"alarm",x.alarm);all.put(o);}
+        for(Anchors.Anchor x:prefs.anchors()){JSONObject o=new JSONObject();Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"uidText",x.uidText);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);Prefs.put(o,"alarm",x.alarm);all.put(o);}
         return all;
     }
     /** Weekly/monthly counts and the latest session, computed from the local record only. */
@@ -483,7 +489,7 @@ public class MainActivity extends Activity {
         if(a==null)return list;
         for(int i=0;i<a.length();i++){
             JSONObject o=a.optJSONObject(i);if(o==null)continue;
-            list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),o.optLong("uid"),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true)));
+            list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),Prefs.uidOf(o),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true)));
         }
         return Anchors.sanitize(list);
     }

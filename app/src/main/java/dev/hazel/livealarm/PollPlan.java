@@ -71,6 +71,25 @@ public final class PollPlan {
     }
 
     /**
+     * The pace outside the user's high-frequency windows, while that option is switched on. Polling
+     * around the clock at a short interval is what empties the battery overnight, and a stream that
+     * is noticed two minutes late still rings. This slows the interval down only: whether the watch
+     * runs at all is duty()'s question, and these windows never widen it.
+     */
+    public static final int LOW_FREQUENCY_SECONDS=120;
+
+    /**
+     * The interval a cycle should plan for. Inside a high-frequency window the configured pace is
+     * kept; outside them the pace is raised to the slow floor, so a setting faster than the floor
+     * cannot make the slow hours expensive. With the option off this is exactly the configured
+     * value — no existing install changes pace.
+     */
+    public static int effectivePollSeconds(int pollSeconds, boolean highFrequency, boolean insideHighWindow) {
+        if (!highFrequency || insideHighWindow) return pollSeconds;
+        return pollSeconds>LOW_FREQUENCY_SECONDS?pollSeconds:LOW_FREQUENCY_SECONDS;
+    }
+
+    /**
      * A scheduled start this near used to lift the idle gap, because outside the reminder window
      * the loop still crawled along at three minutes and a scheduled stream should not be noticed
      * late. Outside the window nothing is polled at all now (see duty()), so nothing is left to

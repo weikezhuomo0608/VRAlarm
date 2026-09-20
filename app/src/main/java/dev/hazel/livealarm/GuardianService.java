@@ -148,7 +148,10 @@ public class GuardianService extends Service {
         prefs.raw().edit().putString("watchTitle",title).apply();
     }
     private Notification watchNotification(String detail){
-        String title=ringing?(testing?"铃声测试中":"开播响铃中"):prefs.enabled()?prefs.raw().getString("watchTitle","正在守候主播"):"正在准备铃声测试";
+        // Silent mode keeps the page and the notification and drops only the sound, so the title
+        // must not claim something is audible. The stored flag is the decision this alarm made.
+        boolean silent=ringing&&prefs.raw().getBoolean("alarmSilent",false);
+        String title=ringing?(testing?(silent?"静音测试中":"铃声测试中"):(silent?"静音提醒中":"开播响铃中")):prefs.enabled()?prefs.raw().getString("watchTitle","正在守候主播"):"正在准备铃声测试";
         java.time.ZoneId zone=TimeRules.zone(prefs.config().optString("timezone"));
         long checked=prefs.raw().getLong("lastSuccess",0);
         String latest=checked>0?java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm:ss").withZone(zone).format(java.time.Instant.ofEpochMilli(checked)):"尚未成功检测";
@@ -166,8 +169,10 @@ public class GuardianService extends Service {
     }
     private Notification alarmNotification(){
         String who=prefs.raw().getString("alarmAnchorName",ringingAnchorName);
+        // A silent test is still a test, but nothing is audible, so its title says so.
+        String testTitle=prefs.raw().getBoolean("alarmSilent",false)?"静音测试 · VR闹钟":"响铃测试 · VR闹钟";
         Notification.Builder b=new Notification.Builder(this,ALARM_CHANNEL).setSmallIcon(R.drawable.ic_bell).setColor(0xff536b81)
-            .setContentTitle(testing?"响铃测试 · VR闹钟":(who.isEmpty()?"主播开播了！":who+" 开播了！")).setContentText(soundTitle)
+            .setContentTitle(testing?testTitle:(who.isEmpty()?"主播开播了！":who+" 开播了！")).setContentText(soundTitle)
             .setStyle(new Notification.BigTextStyle().bigText(soundTitle)).setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC).setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(true)
             .setContentIntent(activity(AlarmActivity.class,2));
@@ -185,7 +190,7 @@ public class GuardianService extends Service {
         }
         if("DISMISS".equals(action)){finishAlarm("dismiss",false);return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
         if("SNOOZE".equals(action)){snoozeAlarm();return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
-        if("TEST".equals(action)){cancelTest();beginAlarm("请确认锁屏、音量和振动是否符合预期",true,"","");if(prefs.enabled()){AlarmScheduler.boundaries(this);check(false);}return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
+        if("TEST".equals(action)){cancelTest();beginAlarm(testTitle(),true,"","");if(prefs.enabled()){AlarmScheduler.boundaries(this);check(false);}return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
         if("CANCEL_TEST".equals(action)){cancelTest();if(testing)finishAlarm("dismiss",false);if(!prefs.enabled()&&!ringing)stopSelf();return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
         if("SNOOZE_FIRE".equals(action)){snoozeCheck=true;check(true);return prefs.enabled()?START_STICKY:START_NOT_STICKY;}
         if(prefs.enabled()){
@@ -311,7 +316,7 @@ public class GuardianService extends Service {
         if(!hasNetwork()){failed("网络未连接，联网后会自动重试",false);return;}
         ArrayList<Anchors.Anchor> targets=new ArrayList<>();
         for(Anchors.Anchor a:prefs.anchors())if(a.enabled)targets.add(a);
-        if(targets.isEmpty()){updateWatch("当前没有启用中的主播");scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),0));return;}
+        if(targets.isEmpty()){updateWatch("当前没有启用中的主播");scheduleNext(PollPlan.gapSeconds(prefs.pollSecondsNow(),prefs.allowed(System.currentTimeMillis()),0));return;}
         busy=true;final int expected=generation;final ArrayList<Anchors.Anchor> batch=targets;
         io.execute(()->{
             PowerManager.WakeLock brief=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Hazel:Check");
@@ -372,7 +377,7 @@ public class GuardianService extends Service {
             lastInternalError=detail;
             prefs.log("warning","本次检查未能完成","应用内部错误（"+detail+"），仍会按间隔自动重试");
         }
-        scheduleNext(PollPlan.gapSeconds(prefs.config().optInt("pollSeconds",30),prefs.allowed(System.currentTimeMillis()),cycleMillis));
+        scheduleNext(PollPlan.gapSeconds(prefs.pollSecondsNow(),prefs.allowed(System.currentTimeMillis()),cycleMillis));
     }
     /**
      * A cycle that started this long after the service itself asked to be woken is hard evidence
@@ -494,8 +499,11 @@ public class GuardianService extends Service {
         // Nothing lifts the pace for a nearby scheduled start any more: outside the window there is
         // no cycle left to lift, and inside it the pace is already the configured one. A window
         // that opens exactly on a scheduled start is made punctual by the boundary alarm instead.
+        // The pace itself is the effective one: the configured interval inside the user's
+        // high-frequency windows, and the slow floor outside them while that option is on. The
+        // keep-alive net is derived from the same number in scheduleNext(), so the two cannot drift.
         updateWatch(statusText(cfg,liveCount,liveNames));
-        scheduleNext(PollPlan.gapSeconds(cfg.optInt("pollSeconds",30),inside,cycleMillis));
+        scheduleNext(PollPlan.gapSeconds(prefs.pollSeconds(cfg),inside,cycleMillis));
         WatchWidget.update(this);
         if(cfg.optBoolean("preStream",true)){
             String bestName="";long bestAt=0;
@@ -520,7 +528,8 @@ public class GuardianService extends Service {
         if(!prefs.allowed(System.currentTimeMillis()))return "已到时段外 · 守候即将暂停";
         if(liveCount==1)return liveNames+" 正在直播 · 本场自动去重";
         if(liveCount>1)return liveCount+" 位主播正在直播 · 本场自动去重";
-        return "等待开播 · 每 "+cfg.optInt("pollSeconds",30)+" 秒检查";
+        // The pace the user will actually get right now, which the high-frequency windows change.
+        return "等待开播 · 每 "+prefs.pollSeconds(cfg)+" 秒检查";
     }
     /** Only one alarm may sound at a time; the rest are recorded instead of stacking. */
     private void ring(Anchors.Anchor a,BiliApi.Snapshot s,LiveGate.State state,boolean snoozed){
@@ -576,7 +585,9 @@ public class GuardianService extends Service {
         failures=Math.min(7,failures+1);String old=prefs.raw().getString("networkError","");
         prefs.raw().edit().putString("networkError",message).putLong("lastAttempt",System.currentTimeMillis()).apply();
         if(!message.equals(old))prefs.log("warning","暂时无法确认直播状态",message+"；保留上一状态，不当作下播");
-        int delay=PollPlan.backoffSeconds(prefs.config().optInt("pollSeconds",30),limited,failures);
+        // The failure ladder starts from the effective pace too, so a slow hour does not retry
+        // faster than it polls.
+        int delay=PollPlan.backoffSeconds(prefs.pollSecondsNow(),limited,failures);
         updateWatch(message);scheduleNext(delay);
     }
     private void scheduleNext(int seconds){
@@ -604,6 +615,12 @@ public class GuardianService extends Service {
         else AlarmScheduler.at(this,AlarmScheduler.KEEPALIVE,netAt);
         handler.postDelayed(poll,delay);
     }
+    /** What a test asks the user to confirm. In silent mode the sound and the vibration are absent
+     *  by design, so asking about them would be asking about nothing. */
+    private String testTitle(){
+        boolean silent=QuietMode.active(prefs.config().optLong("silentUntil",QuietMode.OFF),System.currentTimeMillis());
+        return silent?"请确认锁屏与全屏提醒是否符合预期":"请确认锁屏、音量和振动是否符合预期";
+    }
     private boolean beginAlarm(String title,boolean test,String anchorId,String anchorName){
         if(ringing)return false;
         AlertPolicy.Mode mode=NotificationAccess.alertMode(this,prefs);
@@ -614,9 +631,15 @@ public class GuardianService extends Service {
         ringing=true;testing=test;soundTitle=title;soundBegan=SystemClock.elapsedRealtime();
         ringingAnchorId=anchorId;ringingAnchorName=anchorName;
         JSONObject c=prefs.config();long duration=c.optInt("duration",60)*1000L;
-        prefs.raw().edit().putBoolean("alarmTest",test).putString("alarmTitle",title).putLong("alarmUntil",System.currentTimeMillis()+duration).apply();
+        // Silent mode is decided once, here, and stored with the rest of the alarm state: the
+        // ringing page has to describe the alarm that is actually sounding, not the setting as it
+        // will read a minute later. Only the ring and the vibration are held back — the full-screen
+        // page, the notification and the snooze are untouched.
+        boolean silent=QuietMode.active(c.optLong("silentUntil",QuietMode.OFF),System.currentTimeMillis());
+        prefs.raw().edit().putBoolean("alarmTest",test).putBoolean("alarmSilent",silent).putString("alarmTitle",title).putLong("alarmUntil",System.currentTimeMillis()+duration).apply();
         prefs.raw().edit().putString("alarmAnchorId",anchorId).putString("alarmAnchorName",anchorName).apply();
         prefs.raw().edit().putString("lastAlarmMode",mode.name()).putString("serviceError","").apply();
+        if(silent)prefs.log("system","静音模式 · 本次不发声","全屏提醒与通知照常；铃声和振动按静音模式跳过");
         refreshNotices(true);
         if(mode!=AlertPolicy.Mode.NORMAL){
             // Keep the mandatory WATCH foreground notification. The OS controls its visibility.
@@ -625,10 +648,12 @@ public class GuardianService extends Service {
         soundLock.acquire(duration+15000);
         handler.removeCallbacks(stopSound);handler.postDelayed(stopSound,duration);
         boolean quiet=c.optBoolean("quietCalls",true)&&(audio.getMode()==AudioManager.MODE_IN_CALL||audio.getMode()==AudioManager.MODE_IN_COMMUNICATION);
-        if(quiet)prefs.log("warning","通话中，改为振动提醒","声音设置中的“通话时不强响铃”已生效");
-        try{if(c.optBoolean("vibrate")&&vibrator!=null&&vibrator.hasVibrator())vibrator.vibrate(VibrationEffect.createWaveform(new long[]{0,500,250,500,1000},0),new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());}
+        if(quiet&&!silent)prefs.log("warning","通话中，改为振动提醒","声音设置中的“通话时不强响铃”已生效");
+        // Vibration is noise too: a phone buzzing on a desk in a meeting is the very thing silent
+        // mode exists to prevent, so it goes with the ring.
+        try{if(!silent&&c.optBoolean("vibrate")&&vibrator!=null&&vibrator.hasVibrator())vibrator.vibrate(VibrationEffect.createWaveform(new long[]{0,500,250,500,1000},0),new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());}
         catch(RuntimeException e){prefs.log("warning","系统未能启动振动","继续尝试播放铃声");}
-        if(!quiet){
+        if(!quiet&&!silent){
             try{
                 int old=audio.getStreamVolume(AudioManager.STREAM_ALARM),max=audio.getStreamMaxVolume(AudioManager.STREAM_ALARM);
                 int target=Math.max(1,(int)Math.ceil(c.optInt("volume",85)*max/100.0));

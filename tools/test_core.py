@@ -12,9 +12,10 @@ def main():
     root = pathlib.Path(__file__).resolve().parents[1]
     output = root / 'build' / 'core-tests'
     output.mkdir(parents=True, exist_ok=True)
-    classes = ['TimeRules', 'LiveGate', 'AlertPolicy', 'WatchStatus', 'Anchors', 'PollPlan', 'Schedule']
+    classes = ['TimeRules', 'LiveGate', 'AlertPolicy', 'WatchStatus', 'Anchors', 'PollPlan', 'Schedule',
+               'QuietMode']
     tests = ['CoreTests', 'AlertPolicyTests', 'WatchStatusTests', 'AnchorsTests', 'PollPlanTests',
-             'ScheduleTests', 'LiveGateTests']
+             'ScheduleTests', 'LiveGateTests', 'QuietModeTests']
     sources = [root / 'app/src/main/java/dev/hazel/livealarm' / (name + '.java')
                for name in classes]
     sources += [root / 'tests' / (name + '.java') for name in tests]
