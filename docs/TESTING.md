@@ -1,6 +1,50 @@
-> 对外发布版：**1.1.0808（满区版，安装包内 1.1.8）** = 含桌面小宠物；更早的 1.1.6 是去掉了小宠物的过渡版本。**当前版本 1.1.9（静音模式 · 高频时段检测，已发布）**，其验证见下方 1.1.9 两节。公开版号自 1.1.0 起（=内部 1.4.3），下文出现的 1.1.x–1.4.x 多为开发期内部版本号。宠物的提取/烘焙工具（`tools/make_pet_from_screenshot.py`、`tools/bake_pet_art.py` 等）与源截图属本机内部工具，未随仓库发布，故下文提到它们时只作历史记录。
+> 对外发布版：**1.1.0808（满区版，安装包内 1.1.8）** = 含桌面小宠物；更早的 1.1.6 是去掉了小宠物的过渡版本。**GitHub 上当前发布的是 1.1.9（静音模式 · 高频时段检测，已发布）**，其验证见下方 1.1.9 两节；工作区已在做 **1.3.0（舰长红包试行 + 考子）与 1.2.0（同一份源码剪掉舰长红包）两条本地线，均未发布**，验证见下方 1.3.0 一节。公开版号自 1.1.0 起（=内部 1.4.3），下文出现的 1.1.x–1.4.x 多为开发期内部版本号。宠物的提取/烘焙工具（`tools/make_pet_from_screenshot.py`、`tools/bake_pet_art.py` 等）与源截图属本机内部工具，未随仓库发布，故下文提到它们时只作历史记录。
 
 # 验证范围
+
+## 1.3.0（先行本地试行 · 舰长红包提醒）
+
+**只在本地试行，未发布。** 这一版的验收重点是「数据来源对不对、真机能不能收到」，所以随包带了一个「试连一次弹幕」的核对工具。
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 规则内核断言 | 36,046 + 12 + 16 + **77** + **174** + 44 + 13 + 24 + 24 + 13 + **48** 条通过 | 新增三组纯 Java 组件：`PacketsTests` **16** 条（只有 `rp_type=2` 是舰长红包；礼物红包、电池红包与未知取值一律不提醒；没有 id 的红包不提醒，否则会重复打扰；记忆的 id 按 30 分钟过期；缺字段读成空值而不是抛错）、`WbiTests` **8** 条（两个日密钥混出文档里的 32 位签名密钥、参数按名排序+时间戳的完整查询串对上已知向量、时间戳不同签名不同、空参数集照样签）、`DanmakuTests` **24** 条（16 字节包头往返、`protover=2` 的 zlib 解压后再拆内层、brotli 与非 zlib 载荷**跳过而不是抛错**、截断的包丢弃、一帧多包按序取出，以及帧↔包的整条往返）；另有**考子闹钟**的调度断言（`PollPlan.duty` 新增「任一主播要求全天守候」入参）与**两个主播开关彼此独立、每个副本都必须带上**的断言。**省电这一轮又加了 14 条**（`PollPlan.effectivePollSeconds` 的五参重载：时段之外自动吃慢档、即使没开「自动检测节奏」；高频窗口与「手机在用」仍然优先；非法慢档回落默认；`PollPlan.netSeconds`：时段内仍是原来的备胎间隔，时段外等于节奏本身＋一个余量，且不早于它守着的那一轮，省电档不受这条规则影响） |
+| 界面回归 | **95** 个场景通过 | 改写 `both per-room watches are switched on the surface, and the probe listens to the danmaku`——「舰长红包」与「考子」两个入口都在主播页、默认收起、**互斥展开**、面板里逐房间开关真的落库、卡片出现**红色「舰包」标签**（断言 `.rule-tag.packet` 存在）、开考子的主播**卡片变金色**（`.anchor-card.devoted`，并断言 `::before` 的 content 是「考」、`::after` 是 **😅**）、**翻开关后页面保持原来的滚动位置**、编辑弹窗里**不再有**这两个开关（只剩说明与试连按钮）、设置页**不再有**「我的大航海等级」。日程那一组改名并改写为 `a card keeps only what a glance needs: the day, not a footer of labels`（**任何卡片都不许再有整行页脚**、卡片上不许印提前量、一次性安排把日期留在状态行、编辑弹窗里仍看得到两种标签与每条的提前量），另有一条 `an added schedule entry is a day, with no kind to choose`：**编辑弹窗里不许再有种类选择与星期栏**，手动加一条必须是带日期、`days=0` 的安排 |
+| 接口与协议 | 通过（本机实测） | ① `room/v1/Room/room_init?id=` → 真实房间号（老房间有别名）；② `xlive/web-room/v1/index/getDanmuInfo` **需要 wbi 签名 + 匿名指纹 cookie，无需登录**：缺任一项都被风控 `-352` 挡住，补齐后 `code:0` 并给出 `host_list` 与 `token`；③ `wss://<host>:2245/sub` 握手 `101`，鉴权后 40 秒内收到 13 个数据帧，`protover=2` 全部 zlib 成功解压（命令有 `WATCHED_CHANGE`/`HOT_ROOM_NOTIFY`/`POPULARITY_CHANGE`/`LIKE_INFO_V3_*`）——**长连接在开发机是通的**；④ 反面证据：`xlive/lottery-interface/v1/lottery/getLotteryInfoWeb`（文档里的红包接口）**始终 `-352`**（补 wbi 签名、补完整指纹 cookie 也一样），且 `xlive/lottery-interface/v1/lottery/Check` 的 `guard` 实为**大航海抽奖**（参与接口 `v3/guard/join`），**不是**舰长红包；⑥ **弹幕链路的自测**：帧与包头的往返（`DanmakuFrames.wsFrame` → `readWsFrame` → `split` → `commands`，含掩码、>125 字节的两字节长度、pong 的独立操作码）在无头测试里跑通——**这一条正是真机 `弹幕连接已断开` 那个 bug 的回归测试** |
+| 协议取值来源 | 社区字段表 | `data.rp_type`：**1 礼物红包 / 2 上舰红包 / 3 电池红包**，取自社区整理的弹幕字段字典（`TarocchiLive/arcana-world` 的 `internal/tui/danmaku_enums.go`）；长连接的帧版本、操作码与 zlib 行为由本机脚本 `_ws-probe.py` 实抓确认。**项目自己尚未见过真实的舰长红包广播**，故随包带试连工具 |
+| 省电三处改动的复核 | 通过（读码 + 断言） | ① 唤醒锁：`GuardianService.syncPower()` 现在多一个 `prefs.insideWindows(now)` 条件——**时段内与从前逐字一致**，时段外不握锁；② 保活间隔两处 arming 点（`GuardianService.scheduleNext()` 与 `AlarmScheduler.keepAlive()`）都改用 `PollPlan.netSeconds(生效间隔, 连续模式, 时段外)`，且节奏取 `pollSecondsNow()`（生效值，不再是配置值）；③ 心跳写存储节流到 120 秒（两个读它的人分别允许 10 分钟与 15 分钟，余量充足），`WatchWidget.update()` 在「没有放置小组件」或「内容与上次一模一样」时直接返回。**没碰** `LiveGate`/`armedAt`/`ring()`/`AlertPolicy`/`TimeRules`/闹钟编号 201–207，判定链一个字未改 |
+| APK 编译与签名 | 通过（两条线） | **1.3.0 线**（`--line` 默认）：`build/VRAlarm-1.3.0.apk`，`versionCode=57`、`versionName=1.3.0`，apksigner v2/v3 通过，包内 `app.js`/`style.css`/`index.html` 与工作区逐字节一致，sha256 `8ea590e4…`。**1.2.0 线**（`--line 1.2.0`）：`build/VRAlarm-1.2.0.apk`，`versionCode=58`、`versionName=1.2.0`，同一密钥与签名校验，sha256 `b7e3f921…`（51–56 是前几轮的包，作废） |
+| 1.2.0 线确实不含舰长红包功能 | 通过（逐项扫过） | ① 构建期的剪裁带断言：删掉该功能的五个类，按锚点剪掉全部调用处，源文件一改动就构建失败；② 剪裁后逐条检查 Java、界面与样式里是否残留该功能的名字（`PACKET_CHANNEL`、`PACKET_ID`、`Packets.`、`Danmaku`、`Wbi.`、`BiliAuth`、`POPULARITY_RED_POCKET`、「舰长红包」、「舰包」、「`packetOn`」），有残留即失败；③ 出包后再拆包核对：`app.js`/`style.css`/`index.html`/`alarm.html` 里「舰长红包」「舰包」「红包」「`probeDanmaku`」「`packet-picker`」**均为 0 次**，dex 里 `POPULARITY_RED_POCKET`、`hazel_packet_v1`、`DanmakuClient` **均为 0 次**；④ 用该包自己的界面跑了 **12 项行为检查**（`_check-line-1.2.0.cjs`，本机脚本、已入 `.gitignore`）：没有入口/面板/标签/试连按钮/设置节，页面与编辑弹窗文字里没有「红包」二字，**而考子仍然完整可用**——入口在、金色卡片在、开关点下去真的落库，且载荷里**不带 `packet` 字段**（说明它既不读也不写这个存储位） |
+| 界面改动肉眼复核 | 通过（本机截图） | 「考」字与「舰包」标签是纯视觉改动，无头测试只能断言类名与文案，所以另用本机 Chrome（3× 缩放）逐张截图核对：把卡片背景临时画成品红、把图标与文字隐去，再用 PIL 量墨迹框——「考」字实占 **35.3 × 27.7 CSS px**，落在卡片内 **x 16.3–51.3 / y 6.7–34**，**整字在 23px 圆角的裁切区之外**（第一版把字放在 `top:-5px;left:-1px`，被圆角削掉左上一角，量出来才确认不是字体问题而是位置问题）。日程卡片与 1.2.0 线的主播页也各截了一张肉眼过。脚本是 `_shot-kao.cjs`／`_shot-kao-variants.cjs`／`_shot-kao-diag.cjs`／`_check-line-1.2.0.cjs`，与 `_shot-ui.cjs` 一样**只在本机、已入 `.gitignore`**，不是仓库工具链的一部分 |
+| 红线复核 | 通过 | 未改 `LiveGate`/`AlertPolicy`/`ring()`/`armedAt`/`TimeRules`/闹钟编号 201–207：红包提醒有自己的通知 id（210）与 `OPEN_ROOM` 广播动作，不进入响铃链路；弹幕线程只在 `syncWatches()` 里挂/摘，并随 `pauseWatch()` 与 `onDestroy()` 一起停。本轮改动在 `ui-src/app.js` 文案与 `assets/style.css` 样式，外加 1.2.0 线构建期的源码剪裁；**1.2.0 那份副本里连弹幕线程都不存在**，也没有它的通知通道 |
+
+**尚未真机验证**：真机上 `rp_type=2` 的舰长红包广播是否会到达（**用户真机「试连一次弹幕」已能连上并收到 `DANMU_MSG` 等普通命令，只差一条真实的红包广播**）、长时间保持长连接的耗电与被风控的可能、30 分钟去重窗口是否合适（红包一般 5–10 分钟被抢光，这正是窗口取 30 分钟的依据）、通知声音与「点一下去抢」的体验；**考子**在时段之外的整夜耗电（它让守候不停，按「检测间隔」整夜联网），建议只给必须盯的主播出。**遇到舰长红包时请点一次「试连一次弹幕」，把报告发回来**（报告里已包含密钥来源与失败停在哪一步）。
+
+**测试覆盖不到的地方（如实记）**：`MainActivity` 里的三处「把配置拼成 JSON / 从 JSON 拼回主播」都靠读代码复核，无头测试覆盖不到——`anchorStates()`（回传界面）、`readAnchorList()`（备份恢复）、`anchorList()`（导出）。它们正是「开关存不住」那类 bug 的藏身处，所以每加一个主播开关都要逐个过一遍；界面回归只能锁住「保存后重开编辑仍在」这一半。
+
+## 1.2.0（日程版）
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 规则内核断言 | 36,046 + 12 + 16 + 68 + **149** + **44** + 13 + 24 + **24** + **13** 条通过 | `ScheduleTests` 20 → 44：日期合法性（含 2月30日、非 ISO 写法）、日期与星期互斥、两种上限分开、过期判定、`occursOn`；`PollPlanTests` 127 → 149：`nextOccurrence` 返回「开始 + 预告」两个时刻、每条的提前量优先于默认值、一次性安排可以比一周更远、过期跳过、慢档间隔的候选值（1.2.0 起 `{30,60,120,300}`，且默认值必须是候选之一）；新增 `StreamHoursTests` 24 条：半小时直方图（跨午夜不粘连）、覆盖 80% 的最少区间、半小时空档不拆段、超过 4 段时保留最忙的、覆盖率如实计算；新增 `BatchPlanTests` **13** 条：分批边界（0/1/20/21 位、负数与无 uid 的不进批量）、**缺失行必须判成「未知」而不是「未开播」**、房间号对不上不能归给这位主播 |
+| 界面回归 | **94** 个场景通过（原 85 + 9 条） | 新增：带日期的安排**存成一次性**（`days=0`、`date`、`lead` 一起落库，原周表不受影响）、过期安排进「已结束」并一键清理（只删过期的）、按历史推荐先弹确认再替换 `highWindows`（样本不足时如实提示）、低频间隔可选并让文案跟着变、设置页两个开关各自保存、响铃页 5 秒倒计时**可取消**且到点真的只发一次 `openLive(auto:true)`；**界面整治后补**：「every arrangement says whether it repeats or happens once」（两类卡片都带「每周／单次」标签与底栏，只有单次带左侧竖标记）、「a watch window cannot be made for a single day」（时段弹窗里没有日期字段与单日选项；撤掉全部星期会被拒并提示，选了星期五存下来的是 `days=16` 且 `date` 为空）；**批量检测后补**：「the pacing card says which of the two things lifted the pace」（四态文案：关闭中／高频时段内／手机在用／低频时段，且总开关关闭时「在用」不生效）、慢档候选锁成 `30 秒/1 分钟/2 分钟/5 分钟` 且 `30` 存成数字而非字符串 |
+| 接口契约实测 | 通过 | 2026-09-22 本机 curl：`get_info` **1694 B**、`room_init` **318 B**、批量端点 `get_status_info_by_uids?uids[]=…` 按返回行数计 **1 行 706 B / 2 行 1452 B / 5 行 2587 B**；**参数必须写 `uids[]=`**（`uids=1,2` 返回 `code:1 invalid params`）；**查不到的 uid 被直接省略**（用 `9999999999999999` 验证）；批量行自带 `cover_from_user`，`live_time` 是 **Unix 秒**，而单查端点是 `yyyy-MM-dd HH:mm:ss` 字符串（两种都被 `parse` 读得懂）；**老房间别名会让房间号对不上**（`get_info?room_id=6` 的 uid 50329118，批量里返回的房间是 7734200）→ 由 `BatchPlan.judge` 判成 MISMATCH 并回退单查，不会张冠李戴 |
+| 版式目视检查 | 通过 | `build/shot-120-calendar.png`（今天/本周/即将到来/已结束四段、日期徽标）、`shot-120-editor.png`（「只这一次」开关与日期字段互斥、提前提醒、两种上限计数）、`shot-120-pace.png`（低频间隔选择 + 按历史推荐）、`shot-120-alarm-settings.png`（开播那一刻）、`shot-120-ringing.png`（倒计时与取消）；脚本 `tests/_shot120.cjs`（本机工具，不入库）。**整治后另出**：`build/shot-tidy-week.png`、`shot-tidy-weekly-card.png`、`shot-tidy-once-card.png`（两类卡片对比）、`shot-tidy-once-dark.png`、`shot-tidy-editor.png`（分段「每周重复 / 只这一次」）、`shot-tidy-rules.png`、`shot-tidy-rule-weekly.png`、`shot-tidy-rule-high.png`（两类时段对比，含一条遗留的 `days=0` 规则提示）；脚本 `tests/_shot-tidy.cjs`（本机工具，不入库）。**批量检测后另出**：`shot-tidy-pace-window.png`、`shot-tidy-pace-inuse.png`（改名后的「自动检测节奏」两种提速态，行与行不折行） |
+| 提醒链路复核 | 通过 | 预告的提前量逐条读取；`GuardianService` 同时写入 `preStreamAt`（开始）与 `preStreamArmAt`（预告时刻），`ActionReceiver` 只用后者判新鲜度，`AlarmScheduler.preStream` 不再做减法——原来的两处换算已经消除。**批量检测只换数据来源**：`LiveGate`/`AlertPolicy`/`ring()`/`armedAt`/时段语义/闹钟编号一字未改，逐位判定路径与从前完全相同 |
+| APK 编译与签名 | 通过 | `build/VRAlarm-1.2.0.apk`，`versionCode=42`、`versionName=1.2.0`，应用名「VR闹钟」，apksigner v2/v3 校验通过；包内 `app.js`、`style.css`、`index.html` 与工作区逐字节一致（批量检测后重打，sha256 `0c404c38…`） |
+
+**尚未真机验证**：一次性安排跨天/跨时区的提醒、真机上的自动进入直播间（含锁屏全屏页）、按历史推荐在积累足够场次后的实际效果、低频 5 分钟档的耗电改善；**批量检测**的真机项——一轮的请求次数与耗时（用 `snapshot.latency` 与日志对照改造前后）、1 位与 5 位主播各 8 小时的耗电对照、突击场景的发现延迟、「手机在用」是否真的走了快档（含**夜间充电时它会整夜保持快档**这个代价）。
+
+### 1.1.9 修订（周表图片全屏查看器，版本号不变、**未发布**）
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 界面回归 | **85** 个场景通过 | 新增「the schedule picture opens full screen and zooms, pans and resets」：按屏幕宽度铺满打开（fit < 1、1:1 可放大）、**双击放大**（合成 Touch 事件）、**拖动平移**（放大后 x/y 变化且不越界）、**双指缩放按手指比例**（80px→200px 即 2.5×）、「原始大小」=1:1 与「适应屏幕」回到 fit、返回键先关图片并恢复页面滚动、编辑弹窗里的图片是第二个入口 |
+| 测试脚手架 | 已加固 | 回归用的 `/schedule/` 图片改为**真尺寸 PNG**（520×760，Node zlib 现场生成）：1×1 的占位图会让查看器的算术失去意义（fit 会变成几百倍、`原始大小` 永远被钳回 fit）；合成触摸事件按真实形状派发（`touchend` 的 `touches` 为空、被抬起的手指在 `changedTouches` 里），否则轻点会被当成「手指仍按着」 |
+| 版式目视检查 | 通过 | `build/shot-viewer-week.png`（周表页整行可点）、`shot-viewer-fit.png`（铺满屏幕）、`shot-viewer-zoom.png`（1:1，控制条在亮图上仍清晰）、`shot-viewer-editor.png`（缩略图右下角「点击放大」）；脚本 `tests/_viewshot.cjs` 可重跑（本机内部工具，不入库） |
+| APK 编译与签名 | 通过 | `build/VRAlarm-1.1.9.apk` 重新构建，仍为 `versionCode=41`、`versionName=1.1.9`；**与线上同名 Release 的包不同**（本地 sha256 `b4d7074c…`，线上 `e5f5b4a0…`），发布前需确认是否改号 |
+
+**尚未真机验证**：真机上的双指缩放与拖动是否跟手、大图（≥2000px）缩放时的内存与流畅度。
 
 ### 1.1.9 增补（高频时段检测，版本号不变）
 

@@ -13,7 +13,17 @@ import java.util.concurrent.*;
 
 public class GuardianService extends Service {
     public static final String WATCH_CHANNEL="hazel_watch_v1", ALARM_CHANNEL="hazel_alarm_v1";
-    public static final int WATCH_ID=101, ALARM_ID=102;
+    /**
+     * The red-packet notice has a channel of its own, and — unlike the alarm channel, whose sound is
+     * the app's own ringtone — it keeps the system's default sound and vibration. A packet is only
+     * worth a minute or two, so the notice has to be noticeable without the app playing audio itself,
+     * which keeps the ringing path and its consent rules untouched.
+     */
+    public static final String PACKET_CHANNEL="hazel_packet_v1";
+    public static final int WATCH_ID=101, ALARM_ID=102, END_ID=103;
+    /** Its own id, outside the alarm range 201–207 on purpose: a packet notice must never overwrite
+     *  or be overwritten by the stream alarm. */
+    public static final int PACKET_ID=210;
     public static volatile boolean running=false, ringing=false, overlayVisible=false;
     private static java.lang.ref.WeakReference<GuardianService> active=new java.lang.ref.WeakReference<>(null);
     private AlarmOverlay overlay;
@@ -32,13 +42,21 @@ public class GuardianService extends Service {
     private String ringingAnchorId="", ringingAnchorName="";
     /** Anchors that went live while someone else was ringing and will follow in turn. */
     private final ArrayDeque<String> ringQueue=new ArrayDeque<>();
+    /** One danmaku connection per room that asked for 舰长红包 reminders, keyed by anchor id. */
+    private final HashMap<String,DanmakuClient> watches=new HashMap<>();
     private boolean busy=false, destroyed=false, testing=false, snoozeCheck=false;
     private int failures=0,generation=0;private long soundBegan=0;private String soundTitle="";
     private final Runnable poll=()->check(false);
     private final Runnable stopSound=()->finishAlarm("timeout",false);
+    /** How old the stored heartbeat may get before it is written again. The two readers allow far
+     *  more than this (the interruption notice waits ten minutes, the watchdog fifteen), so there is
+     *  nothing to gain from a write every tick — and the watch runs for days at a time. */
+    private static final long HEARTBEAT_WRITE_MS=120000L;
     private final Runnable heartbeat=new Runnable(){@Override public void run(){
         if(destroyed)return;
-        prefs.raw().edit().putLong("serviceHeartbeatAt",System.currentTimeMillis()).apply();
+        long now=System.currentTimeMillis();
+        if(now-prefs.raw().getLong("serviceHeartbeatAt",0)>=HEARTBEAT_WRITE_MS)
+            prefs.raw().edit().putLong("serviceHeartbeatAt",now).apply();
         syncPower();refreshNotices(false);WatchWidget.update(GuardianService.this);
         handler.postDelayed(this,30000);
     }};
@@ -80,6 +98,117 @@ public class GuardianService extends Service {
             .setCategory(Notification.CATEGORY_REMINDER).setAutoCancel(true).build();
         ((NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE)).notify(206,n);
     }
+    /**
+     * The rooms that asked for 舰长红包 reminders get one danmaku connection each, reconciled
+     * against what this cycle has just seen: on air, that room keeps a connection; offline, muted
+     * or turned off, it does not. This is event-driven on purpose — the room broadcasts the packet
+     * the moment it appears, and a packet lives only five to ten minutes, so no polling pace could
+     * compete. One idle connection (a heartbeat every thirty seconds) is also cheaper than a
+     * request every two minutes. Nothing here touches the ringing path.
+     */
+    private void syncWatches(List<Anchors.Anchor> batch,List<Observation> seen){
+        HashSet<String> wanted=new HashSet<>();
+        for(int i=0;i<batch.size()&&i<seen.size();i++){
+            Anchors.Anchor a=batch.get(i);Observation o=seen.get(i);
+            if(!a.packet||o==null||o.snapshot==null||o.snapshot.status!=1)continue;
+            wanted.add(a.id);
+            startWatch(a);
+        }
+        synchronized(watches){
+            Iterator<Map.Entry<String,DanmakuClient>> it=watches.entrySet().iterator();
+            while(it.hasNext()){
+                Map.Entry<String,DanmakuClient> entry=it.next();
+                if(wanted.contains(entry.getKey()))continue;
+                entry.getValue().stop();
+                prefs.log("packet","红包连接已断开",entry.getKey()+" · 下播、停守候或关掉开关后不再连着");
+                it.remove();
+            }
+        }
+    }
+    private void startWatch(Anchors.Anchor a){
+        synchronized(watches){
+            if(watches.containsKey(a.id))return;
+            DanmakuClient client=new DanmakuClient(a.room,command->onPocket(a,command));
+            watches.put(a.id,client);
+            // Recorded because "was the app listening when the packet appeared" is the first
+            // question a missed packet raises, and the record page is where it gets answered.
+            prefs.log("packet","红包连接已建立",nameOf(a)+" · 从这一刻起，这个房间发的红包才收得到");
+            Thread thread=new Thread(client::run,"Hazel:Danmaku");
+            thread.setDaemon(true);
+            thread.start();
+        }
+    }
+    /** Dropping every connection is what parking the watch and shutting down both do. */
+    private void stopWatches(){
+        synchronized(watches){
+            for(DanmakuClient client:watches.values())client.stop();
+            watches.clear();
+        }
+    }
+    /**
+     * One broadcast from a watched room. Every red-packet command is recorded verbatim first, then
+     * {@link Packets#fresh} decides whether it is worth a notice; the hundreds of ordinary danmaku
+     * around it are dropped right here.
+     */
+    private void onPocket(Anchors.Anchor a,JSONObject command){
+        try{
+            String cmd=command.optString("cmd","");
+            // Recorded before any rule looks at it: the trial has never seen a real broadcast, so
+            // the raw text is the only thing that can settle what the fields and kinds really are,
+            // and it has to survive even when nothing gets announced.
+            if(cmd.startsWith("POPULARITY_RED_POCKET"))prefs.log("packet","红包广播原文",clip(nameOf(a)+" · "+cmd+" "+command.toString()));
+            Packets.Item item=BiliApi.parsePocket(command);
+            if(item==null)return;
+            List<Packets.Item> fresh=Packets.fresh(prefs.announcedPackets(a.id),Collections.singletonList(item));
+            if(fresh.isEmpty())return;
+            prefs.rememberPackets(a.id,fresh);
+            announcePacket(a,fresh.get(0));
+        }catch(Exception ignored){}
+    }
+    /**
+     * One notice per room and packet: the remembered ids keep the same packet from being announced
+     * again on the next broadcast.
+     */
+    private void announcePacket(Anchors.Anchor a,Packets.Item item){
+        String who=nameOf(a);
+        String kind=Packets.typeName(item.rpType);
+        boolean guard=Packets.guard(item.rpType);
+        String left=item.leftMillis>0?"，约剩 "+Math.max(1,item.leftMillis/60000)+" 分钟":"";
+        prefs.log("packet",kind+"提醒",who+" · "+kind+(guard?"（0.1 折上舰）":"")+left);
+        try{
+            Notification n=new Notification.Builder(this,PACKET_CHANNEL).setSmallIcon(R.drawable.ic_bell).setColor(0xff536b81)
+                .setContentTitle(kind+" · "+who)
+                .setContentText(guard?"0.1 折上舰红包，点一下去抢"+left:"房间里发了"+kind+"，点一下去直播间"+left)
+                .setCategory(Notification.CATEGORY_EVENT).setAutoCancel(true).setPriority(Notification.PRIORITY_HIGH)
+                .setContentIntent(action("OPEN_ROOM",(int)a.room,a.room)).build();
+            notifications.notify(PACKET_ID,n);
+        }catch(Exception ignored){}
+    }
+    /** A record line has to stay readable: long broadcasts are clipped at the head. */
+    private static String clip(String text){return text.length()<=400?text:text.substring(0,400)+"…";}
+    /** The anchor's name for a notice or a record entry. */
+    private static String nameOf(Anchors.Anchor a){return a.name==null||a.name.isEmpty()?"主播":a.name;}
+    /** A notification button that opens the room. It has to go through the receiver: a tap on the
+     *  notification is what grants the app its short window to start an activity at all. */
+    private PendingIntent action(String name,int id,long room){
+        return PendingIntent.getBroadcast(this,id,new Intent(this,ActionReceiver.class).setAction(name).putExtra("room",room),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+    }
+    /**
+     * An optional quiet notice that the stream the alarm was about has ended. It is a plain
+     * notification with no sound: the user asked to be told, not to be interrupted again.
+     */
+    private void endNotice(Anchors.Anchor a){
+        if(!prefs.config().optBoolean("endNotice",false))return;
+        String who=a==null?prefs.raw().getString("alarmAnchorName",""):a.name;
+        try{
+            Notification n=new Notification.Builder(this,ALARM_CHANNEL).setSmallIcon(R.drawable.ic_bell).setColor(0xff536b81)
+                .setContentTitle("直播已结束").setContentText((who.isEmpty()?"主播":who)+" 下播了")
+                .setCategory(Notification.CATEGORY_STATUS).setAutoCancel(true).setOnlyAlertOnce(true)
+                .setContentIntent(activity(MainActivity.class,3)).build();
+            notifications.notify(END_ID,n);
+        }catch(Exception ignored){}
+    }
+
     /** Explicit stop never starts a new foreground service merely to stop it. */
     public static void stopWatching(Context c){
         Prefs p=new Prefs(c);p.setEnabled(false);
@@ -97,6 +226,10 @@ public class GuardianService extends Service {
         watch.setDescription("持续显示直播监测、最近检查和响铃状态；可直接停止守候");watch.setSound(null,null);watch.setShowBadge(false);watch.enableVibration(false);n.createNotificationChannel(watch);
         NotificationChannel alarm=new NotificationChannel(ALARM_CHANNEL,"开播强提醒",NotificationManager.IMPORTANCE_HIGH);
         alarm.setDescription("开播与测试闹铃；声音由应用内的铃声设置控制");alarm.setSound(null,null);alarm.enableVibration(false);alarm.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);n.createNotificationChannel(alarm);
+        NotificationChannel packet=new NotificationChannel(PACKET_CHANNEL,"舰长红包提醒",NotificationManager.IMPORTANCE_HIGH);
+        // No setSound(null) on purpose: this channel is meant to be heard, and letting the system
+        // play its own notification sound keeps the app's ringtone path out of it entirely.
+        packet.setDescription("开播中监测到舰长红包时提醒你，点一下就去抢；与开播闹铃互不影响");packet.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);n.createNotificationChannel(packet);
     }
     @Override public void onCreate(){
         super.onCreate();prefs=new Prefs(this);notifications=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);audio=(AudioManager)getSystemService(AUDIO_SERVICE);
@@ -238,11 +371,13 @@ public class GuardianService extends Service {
         }catch(RuntimeException e){lastNoticeKey="";prefs.log("warning","守候通知更新未成功","检测仍继续，请检查系统通知设置");}
     }
     private void syncPower(){
-        // The schedule now decides whether the watch runs at all, so it also decides whether the
-        // lock may be held. Continuous mode still changes something inside the window: the lock
-        // stays held through it instead of only while a cycle is running.
+        // The lock is what makes detection punctual, and it is also the most expensive thing this app
+        // does: it keeps the CPU out of deep sleep. So it follows the reminder windows themselves —
+        // 时段内 behaves exactly as before, while the hours that only a 考子 anchor keeps alive go
+        // back to alarm-driven wake-ups (see scheduleNext: there the safety-net alarm is the loop),
+        // and the phone sleeps between checks.
         boolean hold=prefs.enabled()&&prefs.config().optBoolean("reliable")
-            &&prefs.watchingNow();
+            &&prefs.watchingNow()&&prefs.insideWindows(System.currentTimeMillis());
         if(hold){watchLock.acquire(600000);}else release(watchLock);
     }
     /** getActiveNetwork() briefly reports nothing during a Wi-Fi/cellular handover; any usable
@@ -265,13 +400,66 @@ public class GuardianService extends Service {
             this.anchor=anchor;this.snapshot=snapshot;this.error=error;this.rateLimited=rateLimited;
         }
     }
+    /**
+     * One cycle. Every anchor that can be asked by uid goes into a single batch request, so the round
+     * trip does not grow with the roster; the ones the batch could not answer for fall back to their
+     * own request, which is what keeps a missing row from ever reading as "offline".
+     *
+     * A chunk that fails to answer at all sends its own uids down the fallback path as well: the
+     * cycle degrades to the old per-anchor cost instead of losing every anchor at once.
+     */
     private List<Observation> fetchAll(List<Anchors.Anchor> targets){
+        long[] uids=new long[targets.size()];
+        for(int i=0;i<targets.size();i++)uids[i]=targets.get(i).uid;
+        HashMap<Long,JSONObject> rows=new HashMap<>();
+        HashSet<Long> unanswered=new HashSet<>();
+        boolean sent=false;long began=System.nanoTime();
+        for(long[] chunk:BatchPlan.chunks(uids)){
+            if(sent){try{Thread.sleep(400);}catch(InterruptedException ignored){}}
+            sent=true;
+            try{rows.putAll(BiliApi.batchStatus(chunk));}
+            catch(Exception e){for(long uid:chunk)unanswered.add(uid);}
+        }
+        long batchLatency=(System.nanoTime()-began)/1000000;
         ArrayList<Observation> out=new ArrayList<>();
-        for(int i=0;i<targets.size();i++){
-            if(i>0){try{Thread.sleep(400);}catch(InterruptedException ignored){}}
-            out.add(observe(targets.get(i)));
+        for(Anchors.Anchor a:targets){
+            JSONObject row=(a.uid>0&&!unanswered.contains(a.uid))?rows.get(a.uid):null;
+            BatchPlan.State state=BatchPlan.judge(row!=null,row==null?0:row.optLong("room_id",0),a.room);
+            if(state!=BatchPlan.State.USABLE){
+                if(sent){try{Thread.sleep(400);}catch(InterruptedException ignored){}}
+                sent=true;
+                out.add(observe(a));
+                continue;
+            }
+            try{
+                BiliApi.Snapshot s=BiliApi.parse(row,"batch",a.uid,a.room);
+                s.checkedAt=System.currentTimeMillis();s.latency=batchLatency;
+                finishCover(a,s);
+                out.add(new Observation(a,s,null,false));
+            }catch(BiliApi.ApiException e){
+                // A row that parses badly (missing status, unreadable time) is another reason to ask
+                // about this one anchor on its own, not a reason to fail the cycle.
+                if(sent){try{Thread.sleep(400);}catch(InterruptedException ignored){}}
+                sent=true;
+                out.add(observe(a));
+            }
         }
         return out;
+    }
+    /**
+     * A batched row usually carries its own cover (cover_from_user), so this is the repair path, not
+     * the normal one: it fires only for a room that published none, and then at most once per
+     * session — coverFor remembers the attempt whether it produced a picture or not, so such a room
+     * does not cost a request on every cycle.
+     */
+    private void finishCover(Anchors.Anchor a,BiliApi.Snapshot s){
+        JSONObject previous=prefs.snapshot(a.id);
+        long tried=previous.optLong("coverFor",0);
+        if(s.cover.isEmpty())s.cover=previous.optString("cover","");
+        if(s.cover.isEmpty()&&s.start>0&&tried!=s.start){
+            try{String cover=BiliApi.liveCover(a.room);if(!cover.isEmpty())s.cover=cover;}catch(Exception ignored){}
+        }
+        s.coverFor=s.start>0?s.start:tried;
     }
     /** One anchor per call. A raw socket failure (reset/timeout) gets exactly one quick
      *  retry: Bilibili servers drop connections for risk-control or network reasons that
@@ -325,6 +513,9 @@ public class GuardianService extends Service {
                 // The lock has to cover every request in the cycle, not just the first one.
                 brief.acquire(PollPlan.wakeLockMillis(batch.size()));
                 List<Observation> seen=fetchAll(batch);
+                // Same network phase, same wake lock: the red-packet connections are reconciled
+                // against the rooms this very cycle has just seen on air.
+                syncWatches(batch,seen);
                 int spent=(int)(SystemClock.elapsedRealtime()-began);
                 handler.post(()->{
                     busy=false;if(destroyed||expected!=generation||!prefs.enabled())return;
@@ -343,6 +534,8 @@ public class GuardianService extends Service {
      */
     private void pauseWatch(){
         handler.removeCallbacks(poll);
+        // The red-packet connections live inside the schedule too: parking the watch closes them.
+        stopWatches();
         AlarmScheduler.cancel(this,AlarmScheduler.KEEPALIVE);
         // Recovery would only keep asking for a service that is not supposed to exist right now.
         WatchRecovery.cancel(this);
@@ -449,10 +642,13 @@ public class GuardianService extends Service {
                 LiveGate.State state=prefs.gate(o.anchor.id);
                 // Arm time is per anchor: one added while the watch was already running has its own
                 // moment of joining, so a stream that began earlier is not reported as a new start.
-                LiveGate.Decision d=LiveGate.observe(state,o.snapshot.status==1,o.snapshot.start,o.snapshot.checkedAt,prefs.armedAt(o.anchor.id),catchUp,t->TimeRules.contains(t,allDay,windows,zone));
+                LiveGate.Decision d=LiveGate.observe(state,o.snapshot.status==1,o.snapshot.start,o.snapshot.checkedAt,prefs.armedAt(o.anchor.id),catchUp,
+                    // 考子闹钟 widens the schedule for this anchor alone: it rings at any hour, while
+                    // every other room still only rings inside the windows.
+                    t->o.anchor.allDay||TimeRules.contains(t,allDay,windows,zone));
                 boolean explicitlySnoozed=false;
                 if(snoozeTarget!=null&&snoozeTarget.equals(o.anchor.id)){
-                    explicitlySnoozed=o.snapshot.status==1&&TimeRules.contains(o.snapshot.checkedAt,allDay,windows,zone)&&state.session.equals(prefs.snoozeSessionId());
+                    explicitlySnoozed=o.snapshot.status==1&&(o.anchor.allDay||TimeRules.contains(o.snapshot.checkedAt,allDay,windows,zone))&&state.session.equals(prefs.snoozeSessionId());
                     clearSnooze();
                     if(!explicitlySnoozed)prefs.log("skip","暂缓提醒已取消","本场已结束、场次变化或当前处于提醒时段之外");
                 }
@@ -462,7 +658,10 @@ public class GuardianService extends Service {
                 if(d.ring||explicitlySnoozed)ring(o.anchor,o.snapshot,state,explicitlySnoozed);
                 else noteSkip(o.anchor,o.snapshot,state,d);
                 prefs.saveGate(o.anchor.id,state);
-                if(ringing&&!testing&&o.anchor.id.equals(ringingAnchorId)&&state.offlineSamples>=2){finishAlarm("ended",false);prefs.log("system","直播已结束","已停止本次响铃");}
+                if(ringing&&!testing&&o.anchor.id.equals(ringingAnchorId)&&state.offlineSamples>=2){
+                    finishAlarm("ended",false);prefs.log("system","直播已结束","已停止本次响铃");
+                    endNotice(o.anchor);
+                }
                 if(o.snapshot.status!=1&&state.offlineSamples>=2&&o.anchor.id.equals(prefs.snoozeAnchorId()))clearSnooze();
                 if(o.snapshot.status==1){liveCount++;liveNames=liveNames.isEmpty()?o.anchor.name:liveNames+"、"+o.anchor.name;}
             }catch(Exception e){
@@ -495,7 +694,9 @@ public class GuardianService extends Service {
         java.time.LocalDate day=java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
         long sod=day.atStartOfDay(zone).toInstant().toEpochMilli();
         int weekday=day.getDayOfWeek().getValue()-1;
-        boolean inside=TimeRules.contains(now,allDay,windows,zone);
+        // A 考子闹钟 anchor keeps the watch inside its own hours, so the pace has to be the open-hours
+        // one too: outside the windows the loop would otherwise crawl as if it were parked.
+        boolean inside=prefs.anchorAllDay()||TimeRules.contains(now,allDay,windows,zone);
         // Nothing lifts the pace for a nearby scheduled start any more: outside the window there is
         // no cycle left to lift, and inside it the pace is already the configured one. A window
         // that opens exactly on a scheduled start is made punctual by the boundary alarm instead.
@@ -506,19 +707,19 @@ public class GuardianService extends Service {
         scheduleNext(PollPlan.gapSeconds(prefs.pollSeconds(cfg),inside,cycleMillis));
         WatchWidget.update(this);
         if(cfg.optBoolean("preStream",true)){
-            String bestName="";long bestAt=0;
+            String bestName="";long bestStart=0,bestArm=0;
             for(Anchors.Anchor a:prefs.anchors()){
                 if(!a.enabled||!a.alarm)continue;
-                long at=PollPlan.nextStart(prefs.schedule(a.id),weekday,sod,now,PollPlan.PRESTREAM_LEAD_MILLIS);
-                if(at>0&&(bestAt==0||at<bestAt)){bestAt=at;bestName=a.name;}
+                long[] next=PollPlan.nextOccurrence(prefs.schedule(a.id),day,sod,zone,now,PollPlan.PRESTREAM_LEAD_MILLIS);
+                if(next!=null&&(bestArm==0||next[1]<bestArm)){bestStart=next[0];bestArm=next[1];bestName=a.name;}
             }
-            // bestAt is the alarm moment (start minus the lead); the stored value is the start
-            // itself, because that is what both the notice and the widget have to show. With no
-            // upcoming start the caller must pass 0, not 0+lead, or an alarm would be armed for
-            // the epoch and fire at once.
-            long startAt=bestAt>0?bestAt+PollPlan.PRESTREAM_LEAD_MILLIS:0;
-            if(startAt>0)prefs.raw().edit().putString("preStreamName",bestName).putLong("preStreamAt",startAt).apply();
-            AlarmScheduler.preStream(this,startAt);
+            // Both moments are stored: the start is what the notice and the widget print, the arm
+            // moment is what the alarm was set for. Deriving one from the other is exactly how the
+            // lead drifted once it stopped being a constant. With no upcoming start the caller must
+            // pass 0, not 0+lead, or an alarm would be armed for the epoch and fire at once.
+            if(bestStart>0)prefs.raw().edit().putString("preStreamName",bestName)
+                .putLong("preStreamAt",bestStart).putLong("preStreamArmAt",bestArm).apply();
+            AlarmScheduler.preStream(this,bestArm);
         }else AlarmScheduler.cancel(this,AlarmScheduler.PRESTREAM);
     }
     private String statusText(JSONObject cfg,int liveCount,String liveNames){
@@ -603,14 +804,15 @@ public class GuardianService extends Service {
         // phone is expected to sleep, and the gap is deliberate.
         prefs.raw().edit().putLong("nextCheck",now+delay).putBoolean("nextCheckAllowed",prefs.allowed(now)).apply();
         // Safety net for this loop: past the delay it just chose for itself, so a cycle that
-        // does come back always replaces it and it only fires when the loop has stalled. In
-        // continuous mode it sits half an interval out and is armed as an alarm-clock alarm,
-        // which is the only wake-up Doze honours; the saver value (three intervals, allow
-        // while idle) is exactly what let a sleeping phone detect a stream nine minutes late.
+        // does come back always replaces it and it only fires when the loop has stalled. Inside
+        // the windows, continuous mode arms it as an alarm-clock alarm, which is the only wake-up
+        // Doze honours; the saver value (three intervals, allow while idle) is exactly what let a
+        // sleeping phone detect a stream nine minutes late. Outside the windows the loop survives
+        // only because of a 考子 anchor and nothing holds the CPU for it, so the net sits at the
+        // pace itself — there it *is* the loop, and the phone sleeps in between (PollPlan.netSeconds).
         boolean continuous=prefs.config().optBoolean("turbo",true);
-        long netAt=System.currentTimeMillis()+(continuous
-            ?(long)PollPlan.keepAliveSeconds(seconds,true,true)*1000L
-            :Math.max(90000L,delay*3));
+        boolean outside=!prefs.insideWindows(now);
+        long netAt=now+(long)PollPlan.netSeconds(seconds,continuous,outside)*1000L;
         if(continuous)AlarmScheduler.atDozeProof(this,AlarmScheduler.KEEPALIVE,netAt);
         else AlarmScheduler.at(this,AlarmScheduler.KEEPALIVE,netAt);
         handler.postDelayed(poll,delay);
@@ -728,5 +930,5 @@ public class GuardianService extends Service {
     private void release(PowerManager.WakeLock lock){try{if(lock!=null&&lock.isHeld())lock.release();}catch(Exception ignored){}}
     @Override public IBinder onBind(Intent i){return null;}
     @Override public void onTaskRemoved(Intent rootIntent){if(prefs.enabled())WatchRecovery.schedule(this,false);prefs.log("system","应用页面已划走",prefs.enabled()?"前台守候继续运行；系统仍可按后台策略限制服务":"守候未开启");super.onTaskRemoved(rootIntent);}
-    @Override public void onDestroy(){destroyed=true;running=false;generation++;if(active.get()==this)active.clear();handler.removeCallbacksAndMessages(null);finishAlarm("destroy",true);release(watchLock);if(notificationChanges!=null)try{unregisterReceiver(notificationChanges);}catch(Exception ignored){}if(connectivity!=null&&networkCallback!=null)try{connectivity.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}io.shutdownNow();if(prefs!=null&&prefs.enabled())WatchRecovery.schedule(this,false);super.onDestroy();}
+    @Override public void onDestroy(){destroyed=true;running=false;generation++;if(active.get()==this)active.clear();handler.removeCallbacksAndMessages(null);stopWatches();finishAlarm("destroy",true);release(watchLock);if(notificationChanges!=null)try{unregisterReceiver(notificationChanges);}catch(Exception ignored){}if(connectivity!=null&&networkCallback!=null)try{connectivity.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}io.shutdownNow();if(prefs!=null&&prefs.enabled())WatchRecovery.schedule(this,false);super.onDestroy();}
 }

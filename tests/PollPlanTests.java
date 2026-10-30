@@ -68,21 +68,42 @@ public final class PollPlanTests {
         check(!PollPlan.dueSoon(plan,4,sod,(1200L+31)*60000L),"31 minutes after the start it is no longer soon");
         check(!PollPlan.dueSoon(plan,3,sod,1200*60000L),"the wrong weekday never boosts");
         check(!PollPlan.dueSoon(null,4,sod,1200*60000L),"a null plan never boosts");
-        long at=PollPlan.nextStart(plan,4,sod,(1200L-60)*60000L,10*60000L);
-        check(at==(1200L-10)*60000L,"the pre-stream alarm lands lead minutes before the start");
-        check(PollPlan.nextStart(plan,4,sod,(1200L-9)*60000L,10*60000L)==0,"a start already inside the lead is skipped today");
-        long sat=PollPlan.nextStart(plan,5,sod,(1200L-60)*60000L,10*60000L);
-        check(sat==(1440L*6+1200-10)*60000L,"from Saturday, next Friday is six days out and still found");
-        check(PollPlan.nextStart(new java.util.ArrayList<Schedule.Entry>(),4,sod,0,300000L)==0,"an empty plan has no pre-stream time");
-        // The heads-up stores the start and the alarm is armed lead minutes earlier, so the two
-        // conversions must be exact inverses. When they drifted apart the notification announced
-        // a start five minutes later than the schedule actually said.
+        // nextOccurrence() works in one consistent frame: `today` + its start-of-day + the zone.
+        // The epoch's 1970-01-02 is a Friday, which is what the fixture above uses (days=16).
+        java.time.ZoneId zone=java.time.ZoneId.of("UTC");
+        long day=86400000L;
+        java.time.LocalDate friday=java.time.LocalDate.of(1970,1,2);
+        long sodFri=day*1;
+        long nowF=(1200L-60)*60000L+sodFri;
+        long[] at=PollPlan.nextOccurrence(plan,friday,sodFri,zone,nowF,10*60000L);
+        check(at!=null&&at[0]==1200L*60000L+sodFri,"the occurrence reports the start itself");
+        check(at[1]==at[0]-10*60000L,"the arm moment lands the lead before the start");
+        check(PollPlan.nextOccurrence(plan,friday,sodFri,zone,at[1]+60000L,10*60000L)==null,
+            "a start already inside its lead is not announced any more");
+        java.time.LocalDate saturday=java.time.LocalDate.of(1970,1,3);
+        long sodSat=saturday.atStartOfDay(zone).toInstant().toEpochMilli();
+        long[] sat=PollPlan.nextOccurrence(plan,saturday,sodSat,zone,sodSat+19*3600000L,10*60000L);
+        check(sat!=null&&sat[0]==sodSat+6*day+1200*60000L,"from Saturday, next Friday is six days out and still found");
+        check(PollPlan.nextOccurrence(new java.util.ArrayList<Schedule.Entry>(),friday,sodFri,zone,0,300000L)==null,"an empty plan has no pre-stream time");
         long lead=PollPlan.PRESTREAM_LEAD_MILLIS;
-        check(lead==300000L,"the pre-stream lead is five minutes");
-        long alarmAt=PollPlan.nextStart(plan,4,sod,(1200L-60)*60000L,lead);
-        check(alarmAt==1200L*60000L-lead,"the alarm is armed exactly one lead before the start");
-        check(alarmAt+lead==1200L*60000L,"the stored start is recovered exactly by adding the lead back");
-        check(PollPlan.nextStart(plan,4,sod,alarmAt+lead,lead)==0,"once the start has passed, today yields no further alarm");
+        check(lead==300000L,"the default pre-stream lead is five minutes");
+        check(PollPlan.nextOccurrence(plan,friday,sodFri,zone,nowF,lead)[1]==1200L*60000L+sodFri-lead,
+            "an entry with no lead of its own uses the default");
+
+        // 一次性日程：只有那一天，可以比一周更远；它自己的提前量优先于默认值；过了那一天就不再出现。
+        java.util.ArrayList<Schedule.Entry> events=new java.util.ArrayList<>();
+        events.add(new Schedule.Entry("b",0,1260,-1,"生日会","1970-01-20",60));
+        long[] once=PollPlan.nextOccurrence(events,friday,sodFri,zone,nowF,lead);
+        check(once!=null&&once[0]==(19L*1440+1260)*60000L,"a one-off event is found beyond the seven-day week");
+        check(once[1]==once[0]-3600000L,"the entry's own lead wins over the default");
+        check(PollPlan.nextOccurrence(events,java.time.LocalDate.of(1970,1,20),19*day,zone,19*day,lead)!=null,"the event is still upcoming on its own day");
+        check(PollPlan.nextOccurrence(events,java.time.LocalDate.of(1970,1,21),20*day,zone,20*day,lead)==null,"once its day has passed the event is gone");
+        java.util.ArrayList<Schedule.Entry> both=new java.util.ArrayList<>();
+        both.add(events.get(0));
+        both.add(new Schedule.Entry("f",16,1200,-1,""));
+        long[] after=PollPlan.nextOccurrence(both,java.time.LocalDate.of(1970,1,22),21*day,zone,21*day,lead);
+        check(after!=null&&after[0]==22*day+1200*60000L,"after the event its anchor's weekly slot takes over");
+        check(Schedule.dateOf(new Schedule.Entry("x",0,600,-1,"","2026-02-30",0))==null,"an impossible date parses to nothing");
 
         // 迟到判定：一次迟到本身并不能说明守候停了。休眠会同时推迟唤醒与心跳，
         // 所以只有当进程真的被重建过、或者手机醒着却仍然迟到时，才值得告诉用户。
@@ -113,6 +134,13 @@ public final class PollPlanTests {
         check(PollPlan.duty(true,false,true,false)==PollPlan.Duty.PAUSED,"outside the window the watch parks");
         check(PollPlan.duty(true,false,false,false)==PollPlan.Duty.PAUSED,"custom mode with no rule switched on is parked forever");
         check(PollPlan.duty(true,false,false,true)==PollPlan.Duty.PAUSED,"an impossible reading parks instead of watching");
+        // 考子闹钟: one anchor may ask for round-the-clock watching, and the loop has to run for that
+        // anchor to be watched at all — so it opens the schedule for the watch, not for every anchor.
+        check(PollPlan.duty(true,false,true,false,true)==PollPlan.Duty.WATCHING,"a 考子闹钟 anchor keeps the watch running outside the window");
+        check(PollPlan.duty(true,false,false,false,true)==PollPlan.Duty.WATCHING,"and even with no window defined at all");
+        check(PollPlan.duty(true,false,false,false,false)==PollPlan.Duty.PAUSED,"the same reading parks once no anchor asks for it");
+        check(PollPlan.duty(false,false,true,true,true)==PollPlan.Duty.OFF,"the master switch still wins over 考子闹钟");
+        check(PollPlan.duty(true,true,false,false,true)==PollPlan.Duty.WATCHING,"the user's own all-day mode and an anchor's agree");
         check(PollPlan.keepAliveSeconds(30,true,true)==45,"continuous mode arms the net half an interval out");
         check(PollPlan.keepAliveSeconds(30,false,true)==45,"continuous mode ignores the window when arming the net");
         check(PollPlan.keepAliveSeconds(30,true,true)<PollPlan.keepAliveSeconds(30,true,false),"continuous mode is far sooner than the saver net");
@@ -131,6 +159,40 @@ public final class PollPlanTests {
         check(PollPlan.effectivePollSeconds(120,true,false)==120,"a two-minute setting is already the floor");
         check(PollPlan.effectivePollSeconds(300,true,false)==300,"a pace slower than the floor is never sped up");
         check(PollPlan.LOW_FREQUENCY_SECONDS>PollPlan.MIN_GAP_SECONDS,"the slow floor is an interval, not the safety minimum");
+        // The slow pace is the user's choice (30 s / 1 / 2 / 5 minutes) and is never faster than the floor.
+        for(int choice:PollPlan.LOW_FREQUENCY_CHOICES){
+            check(PollPlan.effectivePollSeconds(15,true,false,choice)==choice,"the chosen slow pace is used ("+choice+")");
+            check(PollPlan.effectivePollSeconds(choice,true,false,choice)==choice,"a pace at the chosen floor stays there ("+choice+")");
+            check(PollPlan.effectivePollSeconds(choice*2,true,false,choice)==choice*2,"a slower pace is never sped up ("+choice+")");
+            check(PollPlan.effectivePollSeconds(15,true,true,choice)==15,"inside the window the chosen floor is irrelevant ("+choice+")");
+            check(PollPlan.effectivePollSeconds(15,false,false,choice)==15,"with the option off the chosen floor is irrelevant ("+choice+")");
+        }
+        check(PollPlan.effectivePollSeconds(15,true,false,0)==PollPlan.LOW_FREQUENCY_SECONDS,"an unusable floor falls back to the default");
+        // The hours a 考子 anchor keeps alive: the slow floor applies there on its own, whether or not
+        // the pacing option is on, because nobody is expecting a reminder at 4 am.
+        check(PollPlan.effectivePollSeconds(30,false,false,PollPlan.LOW_FREQUENCY_SECONDS,true)==PollPlan.LOW_FREQUENCY_SECONDS,
+            "outside the reminder windows a 考子 hour is slowed without the pacing option");
+        check(PollPlan.effectivePollSeconds(30,true,false,PollPlan.LOW_FREQUENCY_SECONDS,true)==PollPlan.LOW_FREQUENCY_SECONDS,
+            "and the option being on changes nothing there");
+        check(PollPlan.effectivePollSeconds(60,false,false,300,true)==300,"a one-minute setting is slowed to the chosen floor");
+        check(PollPlan.effectivePollSeconds(600,false,false,120,true)==600,"a pace already slower than the floor is never sped up");
+        check(PollPlan.effectivePollSeconds(30,false,true,120,true)==30,"a high-frequency window still means the user asked for speed");
+        check(PollPlan.effectivePollSeconds(30,false,false,120,false)==30,"inside the windows nothing changes for anyone");
+        check(PollPlan.effectivePollSeconds(30,false,false,0,true)==PollPlan.LOW_FREQUENCY_SECONDS,"an unusable floor falls back even in a 考子 hour");
+        // The net's period is what the phone sleeps through: inside the windows it stays the stall net,
+        // outside them it is the loop itself and must sit at the pace, not three intervals out.
+        check(PollPlan.netSeconds(30,true,false)==PollPlan.keepAliveSeconds(30,true,true),"inside the windows the net is unchanged");
+        check(PollPlan.netSeconds(120,true,true)==120+PollPlan.NET_MARGIN_SECONDS,"a 考子 hour arms the net one margin past the pace");
+        check(PollPlan.netSeconds(120,true,true)<PollPlan.keepAliveSeconds(120,true,false),"and sooner than the saver net it replaces");
+        check(PollPlan.netSeconds(120,true,true)>PollPlan.gapSeconds(120,true,0),"but never sooner than the cycle it carries");
+        check(PollPlan.netSeconds(30,false,true)==PollPlan.keepAliveSeconds(30,true),"the saver value ignores the 考子 rule");
+        check(PollPlan.netSeconds(30,false,false)==PollPlan.keepAliveSeconds(30,true),"and so does a window hour");
+        check(PollPlan.NET_MARGIN_SECONDS>0&&PollPlan.NET_MARGIN_SECONDS<=60,"the margin is small enough to be a pace, not a pause");
+        check(PollPlan.LOW_FREQUENCY_CHOICES.length==4&&PollPlan.LOW_FREQUENCY_CHOICES[0]==30
+            &&PollPlan.LOW_FREQUENCY_CHOICES[3]==300,"the offered floors run from thirty seconds to five minutes");
+        // The default must be one the interface offers, or a stored value could not be displayed.
+        boolean offersDefault=false;for(int choice:PollPlan.LOW_FREQUENCY_CHOICES)if(choice==PollPlan.LOW_FREQUENCY_SECONDS)offersDefault=true;
+        check(offersDefault,"the default floor is one of the offered ones");
         // A slowed cycle must still be far below the interruption floor, or every slow hour would be
         // reported as the watch having been interrupted.
         check(PollPlan.LOW_FREQUENCY_SECONDS*1000L<PollPlan.INTERRUPTION_FLOOR_MS,"a slow pace cannot look like an interruption");

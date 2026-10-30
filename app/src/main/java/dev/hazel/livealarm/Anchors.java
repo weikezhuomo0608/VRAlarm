@@ -27,22 +27,48 @@ public final class Anchors {
         public final boolean enabled;
         /** Silencing the bell keeps detection, the timeline and the records running. */
         public final boolean alarm;
-        public Anchor(String id, String name, long uid, long room, boolean enabled) { this(id, name, uid, room, enabled, true); }
+        /**
+         * 舰长红包 watch for this room: opt-in, off by default. A 舰长红包 is a 0.1-折 boarding
+         * slot anybody may grab, so any room the user actually visits is worth watching. It never
+         * changes whether the stream itself rings.
+         */
+        public final boolean packet;
+        /**
+         * 考子闹钟: this one anchor is watched around the clock, whatever the reminder windows say,
+         * so its stream is never missed. It opens the schedule for the loop as a whole — the loop
+         * has to be running for the anchor to be watched at all — but never for the other anchors,
+         * whose streams still only ring inside the windows.
+         */
+        public final boolean allDay;
+        public Anchor(String id, String name, long uid, long room, boolean enabled) { this(id, name, uid, room, enabled, true, false); }
         public Anchor(String id, String name, long uid, long room, boolean enabled, boolean alarm) {
-            this(id, name, uid, room, enabled, alarm, null);
+            this(id, name, uid, room, enabled, alarm, false);
         }
         /** For a caller that holds the uid only as text, which the web interface always does. */
         public Anchor(String id, String name, String uidText, long room, boolean enabled, boolean alarm) {
-            this(id, name, parseUid(uidText), room, enabled, alarm, uidText);
+            this(id, name, parseUid(uidText), room, enabled, alarm, false, false, uidText);
         }
-        private Anchor(String id, String name, long uid, long room, boolean enabled, boolean alarm, String uidText) {
-            this.id=id; this.name=name; this.uid=uid; this.room=room; this.enabled=enabled; this.alarm=alarm;
+        /** The full shape: storage carries the packet flag through this one. */
+        public Anchor(String id, String name, String uidText, long room, boolean enabled, boolean alarm, boolean packet) {
+            this(id, name, parseUid(uidText), room, enabled, alarm, packet, false, uidText);
+        }
+        /** Storage carries both opt-in flags through this one. */
+        public Anchor(String id, String name, String uidText, long room, boolean enabled, boolean alarm, boolean packet, boolean allDay) {
+            this(id, name, parseUid(uidText), room, enabled, alarm, packet, allDay, uidText);
+        }
+        public Anchor(String id, String name, long uid, long room, boolean enabled, boolean alarm, boolean packet) {
+            this(id, name, uid, room, enabled, alarm, packet, false, null);
+        }
+        private Anchor(String id, String name, long uid, long room, boolean enabled, boolean alarm, boolean packet, boolean allDay, String uidText) {
+            this.id=id; this.name=name; this.uid=uid; this.room=room; this.enabled=enabled; this.alarm=alarm; this.packet=packet; this.allDay=allDay;
             // Text like "007" or "+12" would leave the two copies disagreeing, so the long wins
             // whenever it is usable and the raw text is only kept when there is no long at all.
             this.uidText = uid>0 ? Long.toString(uid) : (uidText==null ? "" : uidText.trim());
         }
-        public Anchor withEnabled(boolean value) { return new Anchor(id, name, uid, room, value, alarm, uidText); }
-        public Anchor withAlarm(boolean value) { return new Anchor(id, name, uid, room, enabled, value, uidText); }
+        public Anchor withEnabled(boolean value) { return new Anchor(id, name, uid, room, value, alarm, packet, allDay, uidText); }
+        public Anchor withAlarm(boolean value) { return new Anchor(id, name, uid, room, enabled, value, packet, allDay, uidText); }
+        public Anchor withPacket(boolean value) { return new Anchor(id, name, uid, room, enabled, alarm, value, allDay, uidText); }
+        public Anchor withAllDay(boolean value) { return new Anchor(id, name, uid, room, enabled, alarm, packet, value, uidText); }
     }
 
     /**

@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.hazel.livealarm.tests">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <application android:label="Manqu native tests" />
+    <instrumentation android:name="dev.hazel.livealarm.tests.NativeTests" android:targetPackage="dev.hazel.livealarm.multi" android:functionalTest="true" />
+</manifest>

@@ -1,0 +1,91 @@
+# Build outputs and development dependencies
+.gradle/
+**/build/
+node_modules/
+local.properties
+.idea/
+*.iml
+__pycache__/
+*.py[cod]
+tests/results/
+test-results/
+playwright-report/
+
+# Local configuration and signing material
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*password*.txt
+signing.properties
+keystore.properties
+private-signing/
+secrets/
+
+# Ignore build binaries and private diagnostics by default
+*.apk
+*.aab
+*.apks
+*.idsig
+*.jar
+*.log
+*.zip
+# Desktop binaries never belong in this repository: they are large, and this is an
+# Android project. Distribute them through GitHub Releases instead.
+*.exe
+*.msi
+*.dll
+*backup*.json
+*notification-diagnostics*.json
+*system-policy*.txt
+notification-reports/
+
+# Explicit public distribution assets, also used for GitHub Releases
+!release/v1.0.5/ManquAlarm-1.0.5.apk
+!release/v1.0.5/ManquAlarm-1.0.5.zip
+!release/v1.0.5/ManquAlarm-1.0.5-Public-Source.zip
+
+# Editor and platform files
+.DS_Store
+Thumbs.db
+*.swp
+
+# Upstream release artifacts stay out of this repository
+release/
+
+# Local AI handoff notes: keep on disk, do not publish
+AI-HANDOFF.md
+
+# Local agent workspace notes: keep on disk, do not publish
+.workbuddy/
+
+# Internal pet tooling and the source screenshot they consume. They produced
+# app/src/main/assets/pet/*.png on this machine once; the published app only needs
+# the four finished PNGs, so these never ship (see AI-HANDOFF §9.3).
+满区.png
+tools/make_pet_from_screenshot.py
+tools/bake_pet_art.py
+tools/dump_pet_rig.py
+tools/list_pet_textures.py
+tools/render_pet_preview.py
+tools/spine_render.py
+tests/_petdiag.cjs
+tests/_quietshot.cjs
+tests/_viewshot.cjs
+tests/_shot120.cjs
+tests/_shot-tidy.cjs
+
+# local-only probe script (danmaku connectivity) and UI screenshot harnesses
+_ws-probe.py
+_shot-ui.cjs
+_shot-kao.cjs
+_shot-kao-variants.cjs
+_shot-kao-diag.cjs
+_check-line-1.2.0.cjs
+
+# scratch from local API probing (2026-09-17 UID work)
+.tmp-probe/

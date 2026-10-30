@@ -3,6 +3,7 @@ package dev.hazel.livealarm;
 import org.json.*;
 import java.net.*;
 import java.io.*;
+import java.util.*;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 
@@ -12,7 +13,10 @@ public final class BiliApi {
 
     public static final class Snapshot {
         public int status;public long start,checkedAt;public String title,source;public String cover="";public long latency;
-        public JSONObject json(){JSONObject j=new JSONObject();Prefs.put(j,"status",status);Prefs.put(j,"start",start);Prefs.put(j,"checkedAt",checkedAt);Prefs.put(j,"title",title);Prefs.put(j,"cover",cover);Prefs.put(j,"source",source);Prefs.put(j,"latency",latency);return j;}
+        /** The stream start the cover was fetched for. The batch answer carries no cover, so a new
+         *  session asks once and records the attempt here — hit or miss — instead of every cycle. */
+        public long coverFor;
+        public JSONObject json(){JSONObject j=new JSONObject();Prefs.put(j,"status",status);Prefs.put(j,"start",start);Prefs.put(j,"checkedAt",checkedAt);Prefs.put(j,"title",title);Prefs.put(j,"cover",cover);Prefs.put(j,"coverFor",coverFor);Prefs.put(j,"source",source);Prefs.put(j,"latency",latency);return j;}
     }
     /** What the add-anchor flow needs: the canonical room, its owner and their picture. */
     public static final class Profile {
@@ -33,9 +37,14 @@ public final class BiliApi {
         if(d.optLong("room_id",-1)!=room)throw new ApiException("直播间身份校验未通过，已暂停本次提醒",false);
         if(!d.has("live_status"))throw new ApiException("B 站返回缺少直播状态",false);
         int status=d.optInt("live_status",-1);if(status<0||status>2)throw new ApiException("B 站返回未知直播状态",false);
-        Snapshot s=new Snapshot();s.status=status;s.title=d.optString("title","");s.cover=d.optString("user_cover","");s.source=source;
-        Object value=d.opt("live_time");
-        try{
+        Snapshot s=new Snapshot();s.status=status;s.title=d.optString("title","");
+        // The single-room endpoint publishes the cover as user_cover, the batched one as
+        // cover_from_user; it is the same picture, and accepting either keeps a batched cycle to a
+        // single request. The start time likewise arrives as "yyyy-MM-dd HH:mm:ss" from one and as
+        // Unix seconds from the other — the reader below accepts every shape either one uses.
+        s.cover=d.optString("user_cover","");if(s.cover.isEmpty())s.cover=d.optString("cover_from_user","");
+        s.source=source;
+        Object value=d.opt("live_time");        try{
             if(value instanceof Number){long t=((Number)value).longValue();s.start=t>100000000000L?t:t*1000L;}
             else if(value instanceof String && !((String)value).startsWith("0000")){
                 String text=(String)value;
@@ -114,6 +123,64 @@ public final class BiliApi {
         }
         return p;
     }
+    /**
+     * One request for many rooms at once. The payload is an object keyed by uid, and a uid the endpoint
+     * does not know is simply absent from it — the caller must read "absent" as unknown, never as
+     * offline, or a stream would look like it had ended. The parameter has to be written as
+     * `uids[]=`; the comma-separated spelling is rejected with `code:1 invalid params`.
+     */
+    public static Map<Long,JSONObject> batchStatus(long[] uids)throws IOException{
+        StringBuilder query=new StringBuilder();
+        for(long uid:uids){if(query.length()>0)query.append('&');query.append("uids[]=").append(uid);}
+        JSONObject d=request("https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids?"+query,"https://live.bilibili.com/");
+        HashMap<Long,JSONObject> rows=new HashMap<>();
+        Iterator<String> it=d.keys();
+        while(it.hasNext()){
+            String key=it.next();JSONObject row=d.optJSONObject(key);if(row==null)continue;
+            try{rows.put(Long.parseLong(key.trim()),row);}catch(NumberFormatException ignored){}
+        }
+        return rows;
+    }
+    /** The live cover of one room. Only the weekly page's live thumbnail needs it, so the batched
+     *  cycle asks for it once per session rather than every round. */
+    public static String liveCover(long room)throws IOException{
+        JSONObject d=request("https://api.live.bilibili.com/room/v1/Room/get_info?room_id="+room,"https://live.bilibili.com/"+room);
+        return d.optString("user_cover","");
+    }
+    /** The room id behind an alias: the danmaku service authenticates the canonical one. */
+    public static long realRoom(long room)throws IOException{
+        JSONObject d=request("https://api.live.bilibili.com/room/v1/Room/room_init?id="+room,"https://live.bilibili.com/"+room);
+        long real=d.optLong("room_id",0);
+        return real>0?real:room;
+    }
+    /**
+     * The danmaku server and its token for one room. This interface is a newer one, so it needs the
+     * wbi signature and the fingerprint cookie — still no account: a visitor is given both.
+     */
+    public static JSONObject danmuInfo(long realRoom)throws IOException{
+        HashMap<String,String> params=new HashMap<>();
+        params.put("id",Long.toString(realRoom));
+        params.put("type","0");
+        params.put("web_location","444.8");
+        String query=Wbi.query(params,BiliAuth.mixin(),System.currentTimeMillis()/1000L);
+        return request("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?"+query,
+            "https://live.bilibili.com/"+realRoom,BiliAuth.cookieOrEmpty());
+    }
+    /**
+     * One broadcast read as a packet. Only the red-packet commands are looked at, and the kind is
+     * the endpoint's own {@code rp_type} — 2 is the 舰长红包, the only one worth announcing. Every
+     * field is read defensively: a shape change has to mean "nothing to announce", never a crash.
+     */
+    public static Packets.Item parsePocket(JSONObject command){
+        if(command==null)return null;
+        if(!command.optString("cmd","").startsWith("POPULARITY_RED_POCKET"))return null;
+        JSONObject d=command.optJSONObject("data");
+        if(d==null)return null;
+        // end_time is Unix seconds, the same unit the live-status endpoint uses.
+        long end=d.optLong("end_time",0);
+        long left=end>0?end*1000L-System.currentTimeMillis():0;
+        return new Packets.Item(d.optString("lot_id",""),d.optString("sender_name",""),d.optInt("rp_type",0),left);
+    }
     /** Bounded fetch of the avatar, so one oversized response cannot fill the device. */
     public static byte[] download(String address,int cap)throws IOException{
         URL target=new URL(address);
@@ -151,12 +218,15 @@ public final class BiliApi {
         return d.optString("user_cover","");
     }
 
-    private JSONObject request(String address)throws IOException{return request(address,"https://live.bilibili.com/"+room);}
-    private static JSONObject request(String address,String referer)throws IOException{
+    private JSONObject request(String address)throws IOException{return request(address,"https://live.bilibili.com/"+room,null);}
+    private static JSONObject request(String address,String referer)throws IOException{return request(address,referer,null);}
+    /** The same request with the anonymous fingerprint attached — the newer interfaces ask for it. */
+    static JSONObject request(String address,String referer,String cookie)throws IOException{
         HttpURLConnection c=(HttpURLConnection)new URL(address).openConnection();
         c.setConnectTimeout(8000);c.setReadTimeout(8000);c.setInstanceFollowRedirects(false);
         c.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36");
         c.setRequestProperty("Referer",referer);
+        if(cookie!=null&&!cookie.isEmpty())c.setRequestProperty("Cookie",cookie);
         c.setRequestProperty("Accept","application/json");c.setUseCaches(false);
         try{
             int status=c.getResponseCode();if(status==412||status==429)throw new ApiException("B 站暂时限制访问，正在延长重试间隔",true);
@@ -164,6 +234,9 @@ public final class BiliApi {
             ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] buffer=new byte[4096];int n;
             try(InputStream in=c.getInputStream()){while((n=in.read(buffer))!=-1){bytes.write(buffer,0,n);if(bytes.size()>1048576)throw new IOException("响应过大");}}
             JSONObject root=new JSONObject(bytes.toString("UTF-8"));int code=root.optInt("code",-999);
+            // -101 is Bilibili asking for a login, which this app never has: saying so plainly beats
+            // the generic "wait and retry", which sent the reader looking for a permission problem.
+            if(code==-101)throw new ApiException("B 站要求登录后才给这个接口（-101）",false);
             if(code!=0)throw new ApiException("B 站接口返回 "+code+"，等待重试",code==-352||code==-412||code==-509);
             JSONObject d=root.optJSONObject("data");if(d==null)throw new ApiException("B 站接口数据为空",false);return d;
         }catch(JSONException e){throw new ApiException("B 站接口格式变化，暂无法确认开播",false);}finally{c.disconnect();}

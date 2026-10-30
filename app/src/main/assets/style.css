@@ -1,12 +1,38 @@
 @charset "UTF-8";
-:root{--bg:#f5f5f0;--card:#fff;--ink:#2c3841;--muted:#75818a;--line:#e8ebe7;--primary:#516b82;--on-primary:#fff;--soft:#e9eff2;--green:#48796b;--green-bg:#e7f1ea;--amber:#9c6d3b;--amber-bg:#fbf0df;--pink:#b1757b;--shadow:0 6px 24px #2d384108;--radius:23px;color-scheme:light;font-family:system-ui,-apple-system,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6}body.dark{--bg:#181d24;--card:#242c35;--ink:#e5ebef;--muted:#a3adb6;--line:#36424c;--primary:#abc2d6;--on-primary:#202c36;--soft:#303d49;--green:#a2ccb8;--green-bg:#2a4038;--amber:#e1bd8b;--amber-bg:#413729;--pink:#e3b2b9;--shadow:none;color-scheme:dark}button,input,select{font:inherit}button{color:inherit;cursor:pointer;border:0;background:none;touch-action:manipulation}button:disabled{opacity:.55;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #82aabd;outline-offset:3px}input,select{color:var(--ink);max-width:100%}button,select,input[type=time]{min-height:44px}h1,h2,h3,p{margin:0}h1{font-size:28px;letter-spacing:-.8px;font-weight:740;line-height:1.36}h2{font-size:17px;font-weight:700}h3{font-size:15px}small,.small{font-size:12px}.muted{color:var(--muted)}.i{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.i.big{width:28px;height:28px}#app{max-width:580px;margin:auto;min-height:100vh;min-height:100dvh;padding-bottom:92px}#header{height:83px;padding:20px 24px 14px;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:10px}.brand img{width:41px;height:41px;border-radius:14px;object-fit:contain;background:#fff;border:1px solid var(--line)}.brand-name{font-size:18px;font-weight:760;letter-spacing:.3px}.brand-sub{font-size:9px;color:var(--muted);letter-spacing:2.3px;font-weight:650;line-height:1.4}.icon-button{width:44px;height:44px;border-radius:15px;display:grid;place-items:center;background:var(--card);border:1px solid var(--line)}main#content{padding:5px 20px 20px}.eyebrow{font-size:10px;font-weight:750;letter-spacing:2px;color:var(--muted);margin-bottom:8px}.page-heading{padding:12px 4px 24px}.page-heading p{margin-top:8px;color:var(--muted);font-size:13px}.hero{height:224px;position:relative;overflow:hidden;border:1px solid #e4e9e8;border-radius:28px;background:linear-gradient(115deg,#e5edf1 0%,#f1f3ef 80%);padding:24px 22px;margin-bottom:16px}.hero:after{content:'';position:absolute;width:160px;height:160px;border-radius:50%;border:1px solid #bccbd13b;right:-22px;top:15px;pointer-events:none}.hero-copy{position:relative;z-index:2;width:67%}.hero .eyebrow{color:#6a8294;font-size:9px;margin-bottom:14px}.hero h1{font-size:27px;color:#344957;line-height:1.48;letter-spacing:-.9px}.hero .tiny-note{display:flex;align-items:center;gap:5px;font-size:10px;color:#647b89;margin-top:16px}.hero .tiny-note .i{width:13px;height:13px}.hero-art{width:190px;height:218px;position:absolute;bottom:-11px;right:-24px;object-fit:contain;mix-blend-mode:multiply;z-index:1}.hero-chip{position:absolute;bottom:16px;left:22px;border:1px solid #fff9;background:#ffffff95;padding:4px 9px;border-radius:20px;color:#566878;font-size:10px;display:flex;gap:6px;align-items:center;z-index:3}.dot{width:6px;height:6px;border-radius:50%;background:var(--muted);display:inline-block;flex-shrink:0}.dot.green{background:#689b80}.dot.live{background:#c47b85;box-shadow:0 0 0 4px #c47b851b}.dark .hero{background:linear-gradient(120deg,#2c3c4b,#303a40);border-color:var(--line)}.dark .hero h1{color:#e6edf1}.dark .hero .eyebrow,.dark .hero .tiny-note{color:#abbfce}.dark .hero-art{mix-blend-mode:normal;border-radius:70px;width:140px;height:182px;right:6px;bottom:12px;opacity:.94}.dark .hero-chip{background:#24303ad9;border-color:#657a8850;color:#c3d2de}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:14px}.row{display:flex;align-items:center;gap:12px}.between{justify-content:space-between}.grow{flex:1;min-width:0}.label-icon{width:41px;height:41px;border-radius:14px;display:grid;place-items:center;background:var(--soft);color:var(--primary);flex-shrink:0}.label-icon.green{background:var(--green-bg);color:var(--green)}.label-icon.amber{background:var(--amber-bg);color:var(--amber)}.sub{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.65}.switch{position:relative;width:48px;height:30px;min-height:44px;min-width:48px;display:flex;align-items:center;padding:0}.switch:before{content:'';display:block;width:48px;height:29px;background:#dce1e1;border-radius:18px;transition:background .2s}.switch:after{content:'';position:absolute;left:4px;top:11px;width:22px;height:22px;border-radius:50%;background:white;box-shadow:0 2px 4px #1d2f3a20;transition:transform .2s}.switch[aria-checked=true]:before{background:var(--primary)}.switch[aria-checked=true]:after{transform:translateX(18px)}.dark .switch:before{background:#4b5862}.dark .switch[aria-checked=true]:before{background:var(--primary)}.metrics{display:grid;grid-template-columns:repeat(3,1fr);padding-top:17px;margin-top:18px;border-top:1px solid var(--line)}.metric{display:flex;align-items:center;flex-direction:column;min-width:0;position:relative}.metric+.metric{border-left:1px solid var(--line)}.metric strong{font-size:19px;color:var(--primary);font-weight:720;line-height:1.4}.metric small{color:var(--muted);font-size:10px;margin-top:4px}.primary{width:100%;background:var(--primary);color:var(--on-primary);border-radius:15px;padding:13px 18px;font-size:14px;font-weight:680;display:flex;gap:9px;justify-content:center;align-items:center;min-height:50px}.secondary{width:100%;background:var(--soft);color:var(--primary);border-radius:15px;padding:12px 15px;font-size:13px;font-weight:650;display:flex;gap:9px;justify-content:center;align-items:center;min-height:49px}.outline{background:transparent;border:1px solid var(--line);color:var(--ink)}.text-button{color:var(--primary);font-size:12px;font-weight:650;display:flex;align-items:center;gap:5px;padding:0 2px;white-space:nowrap}.text-button .i{width:15px;height:15px}.watch-button{margin-top:20px}.live-info{margin-top:14px;padding-top:13px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px}.live-state{font-size:12px;flex:1;font-weight:550}.live-title{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:12px;margin-top:9px}.timestamp{font-size:10px;color:var(--muted)}.quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}.quick{border-radius:19px;background:var(--card);border:1px solid var(--line);min-height:74px;display:flex;align-items:center;padding:16px;gap:11px;text-align:left}.quick .i{color:var(--primary);width:23px;height:23px}.quick strong{font-size:13px;display:block}.quick small{font-size:10px;display:block;color:var(--muted);margin-top:2px}.live-picker{margin:0 0 14px;border:1px solid var(--line);border-radius:19px;background:var(--card);overflow:hidden;box-shadow:var(--shadow)}
+/* The 考子 corner mark is drawn in a real brush face. No Android build ships a 隶书/行楷, and the
+   commercial ones (方正/华文) may not be redistributed, so the one glyph is shipped instead: a 2 KB
+   subset of the open-licensed brush font Ma Shan Zheng (OFL 1.1, docs/fonts/OFL-MaShanZheng.txt),
+   fetched as a single-character subset from the Google Fonts API. Everything else falls back to the
+   system serif. */
+@font-face{font-family:"Ma Shan Zheng";src:url("kao-mark.ttf") format("truetype");font-display:block}
+:root{--bg:#f5f5f0;--card:#fff;--ink:#2c3841;--muted:#75818a;--line:#e8ebe7;--primary:#516b82;--on-primary:#fff;--soft:#e9eff2;--green:#48796b;--green-bg:#e7f1ea;--amber:#9c6d3b;--amber-bg:#fbf0df;--pink:#b1757b;--red:#bb4130;--red-bg:#fbe8e4;--shadow:0 6px 24px #2d384108;--radius:23px;color-scheme:light;font-family:system-ui,-apple-system,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6}body.dark{--bg:#181d24;--card:#242c35;--ink:#e5ebef;--muted:#a3adb6;--line:#36424c;--primary:#abc2d6;--on-primary:#202c36;--soft:#303d49;--green:#a2ccb8;--green-bg:#2a4038;--amber:#e1bd8b;--amber-bg:#413729;--pink:#e3b2b9;--red:#e79a8d;--red-bg:#4a2a25;--shadow:none;color-scheme:dark}button,input,select{font:inherit}button{color:inherit;cursor:pointer;border:0;background:none;touch-action:manipulation}button:disabled{opacity:.55;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #82aabd;outline-offset:3px}input,select{color:var(--ink);max-width:100%}button,select,input[type=time]{min-height:44px}h1,h2,h3,p{margin:0}h1{font-size:28px;letter-spacing:-.8px;font-weight:740;line-height:1.36}h2{font-size:17px;font-weight:700}h3{font-size:15px}small,.small{font-size:12px}.muted{color:var(--muted)}.i{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.i.big{width:28px;height:28px}#app{max-width:580px;margin:auto;min-height:100vh;min-height:100dvh;padding-bottom:92px}#header{height:83px;padding:20px 24px 14px;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:10px}.brand img{width:41px;height:41px;border-radius:14px;object-fit:contain;background:#fff;border:1px solid var(--line)}.brand-name{font-size:18px;font-weight:760;letter-spacing:.3px}.brand-sub{font-size:9px;color:var(--muted);letter-spacing:2.3px;font-weight:650;line-height:1.4}.icon-button{width:44px;height:44px;border-radius:15px;display:grid;place-items:center;background:var(--card);border:1px solid var(--line)}main#content{padding:5px 20px 20px}.eyebrow{font-size:10px;font-weight:750;letter-spacing:2px;color:var(--muted);margin-bottom:8px}.page-heading{padding:12px 4px 24px}.page-heading p{margin-top:8px;color:var(--muted);font-size:13px}.hero{height:224px;position:relative;overflow:hidden;border:1px solid #e4e9e8;border-radius:28px;background:linear-gradient(115deg,#e5edf1 0%,#f1f3ef 80%);padding:24px 22px;margin-bottom:16px}.hero:after{content:'';position:absolute;width:160px;height:160px;border-radius:50%;border:1px solid #bccbd13b;right:-22px;top:15px;pointer-events:none}.hero-copy{position:relative;z-index:2;width:67%}.hero .eyebrow{color:#6a8294;font-size:9px;margin-bottom:14px}.hero h1{font-size:27px;color:#344957;line-height:1.48;letter-spacing:-.9px}.hero .tiny-note{display:flex;align-items:center;gap:5px;font-size:10px;color:#647b89;margin-top:16px}.hero .tiny-note .i{width:13px;height:13px}.hero-art{width:190px;height:218px;position:absolute;bottom:-11px;right:-24px;object-fit:contain;mix-blend-mode:multiply;z-index:1}.hero-chip{position:absolute;bottom:16px;left:22px;border:1px solid #fff9;background:#ffffff95;padding:4px 9px;border-radius:20px;color:#566878;font-size:10px;display:flex;gap:6px;align-items:center;z-index:3}.dot{width:6px;height:6px;border-radius:50%;background:var(--muted);display:inline-block;flex-shrink:0}.dot.green{background:#689b80}.dot.live{background:#c47b85;box-shadow:0 0 0 4px #c47b851b}.dark .hero{background:linear-gradient(120deg,#2c3c4b,#303a40);border-color:var(--line)}.dark .hero h1{color:#e6edf1}.dark .hero .eyebrow,.dark .hero .tiny-note{color:#abbfce}.dark .hero-art{mix-blend-mode:normal;border-radius:70px;width:140px;height:182px;right:6px;bottom:12px;opacity:.94}.dark .hero-chip{background:#24303ad9;border-color:#657a8850;color:#c3d2de}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:14px}.row{display:flex;align-items:center;gap:12px}.between{justify-content:space-between}.grow{flex:1;min-width:0}.label-icon{width:41px;height:41px;border-radius:14px;display:grid;place-items:center;background:var(--soft);color:var(--primary);flex-shrink:0}.label-icon.green{background:var(--green-bg);color:var(--green)}.label-icon.amber{background:var(--amber-bg);color:var(--amber)}.sub{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.65}.switch{position:relative;width:48px;height:30px;min-height:44px;min-width:48px;display:flex;align-items:center;padding:0}.switch:before{content:'';display:block;width:48px;height:29px;background:#dce1e1;border-radius:18px;transition:background .2s}.switch:after{content:'';position:absolute;left:4px;top:11px;width:22px;height:22px;border-radius:50%;background:white;box-shadow:0 2px 4px #1d2f3a20;transition:transform .2s}.switch[aria-checked=true]:before{background:var(--primary)}.switch[aria-checked=true]:after{transform:translateX(18px)}.dark .switch:before{background:#4b5862}.dark .switch[aria-checked=true]:before{background:var(--primary)}.metrics{display:grid;grid-template-columns:repeat(3,1fr);padding-top:17px;margin-top:18px;border-top:1px solid var(--line)}.metric{display:flex;align-items:center;flex-direction:column;min-width:0;position:relative}.metric+.metric{border-left:1px solid var(--line)}.metric strong{font-size:19px;color:var(--primary);font-weight:720;line-height:1.4}.metric small{color:var(--muted);font-size:10px;margin-top:4px}.primary{width:100%;background:var(--primary);color:var(--on-primary);border-radius:15px;padding:13px 18px;font-size:14px;font-weight:680;display:flex;gap:9px;justify-content:center;align-items:center;min-height:50px}.secondary{width:100%;background:var(--soft);color:var(--primary);border-radius:15px;padding:12px 15px;font-size:13px;font-weight:650;display:flex;gap:9px;justify-content:center;align-items:center;min-height:49px}.outline{background:transparent;border:1px solid var(--line);color:var(--ink)}.text-button{color:var(--primary);font-size:12px;font-weight:650;display:flex;align-items:center;gap:5px;padding:0 2px;white-space:nowrap}.text-button .i{width:15px;height:15px}.watch-button{margin-top:20px}.live-info{margin-top:14px;padding-top:13px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px}.live-state{font-size:12px;flex:1;font-weight:550}.live-title{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:12px;margin-top:9px}.timestamp{font-size:10px;color:var(--muted)}.quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}.quick{border-radius:19px;background:var(--card);border:1px solid var(--line);min-height:74px;display:flex;align-items:center;padding:16px;gap:11px;text-align:left}.quick .i{color:var(--primary);width:23px;height:23px}.quick strong{font-size:13px;display:block}.quick small{font-size:10px;display:block;color:var(--muted);margin-top:2px}.live-picker{margin:0 0 14px;border:1px solid var(--line);border-radius:19px;background:var(--card);overflow:hidden;box-shadow:var(--shadow)}
 .live-picker-head{display:flex;align-items:center;gap:7px;padding:12px 15px 10px;font-size:11px;color:var(--muted)}
 /* Capped so a long roster scrolls inside the panel rather than stretching the page. */
 .live-picker-list{max-height:216px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .live-picker-row{display:flex;align-items:center;gap:11px;width:100%;padding:10px 15px;text-align:left;border-top:1px solid var(--line);min-height:0}
 .live-picker-row:active{background:var(--soft)}
 .live-picker-row .anchor-art{width:38px;height:38px;border-radius:13px}
+/* 考子闹钟（单个主播全天守候）: the whole card becomes the mark — gold, with a 考 in the corner.
+   The letter is asked for as a 隶书/行书 first and pushed towards those proportions either way
+   (wide and flat, slanted), because no Android build ships a 隶书 and a plain fallback would just
+   look like the body font. Since the phone has no decorative face to borrow, the shine is drawn
+   instead: a gold gradient clipped to the glyph, an outline, a tilt. It sits inside the corner arc
+   so the whole character reads; the switch itself is in the 考子 entry above the cards, and the
+   emoji behind it is the user's own joke. */
+.anchor-card.devoted{background:linear-gradient(155deg,#fdf7e6,#f6e7c6);border-color:#e7d3a2;position:relative;overflow:hidden}
+.anchor-card.devoted:before{content:'考';position:absolute;top:4px;left:14px;font-family:"Ma Shan Zheng","FZLiShu","STLiti","LiSu","Xingkai SC","STXingkai","Kaiti SC","STKaiti","Noto Serif CJK SC","Noto Serif SC","Source Han Serif SC","Songti SC",serif;font-size:32px;line-height:1;font-weight:700;transform:scale(1.08,.92) skewX(-8deg) rotate(-4deg);transform-origin:0 0;background:linear-gradient(150deg,#fbe7a6,#dcb445 40%,#a87f16);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-stroke:.8px #8a6710;opacity:.8;pointer-events:none;z-index:0}
+/* The sweat drop, tucked against the letter's lower right — the user's own joke. Deliberately NOT
+   rotated: the letter's tilt is its own transform, and tilting the emoji as well made the face look
+   crooked rather than decorated. */
+.anchor-card.devoted:after{content:'😅';position:absolute;top:19px;left:46px;font-size:15px;line-height:1;opacity:.95;pointer-events:none;z-index:0;filter:drop-shadow(0 1px 1px #00000024)}
+.anchor-card.devoted>.row,.anchor-card.devoted>.rule-footer{position:relative;z-index:1}
+.dark .anchor-card.devoted{background:linear-gradient(155deg,#3c3220,#2f2617);border-color:#6d5a34}
+.dark .anchor-card.devoted:before{background:linear-gradient(150deg,#f8e6ab,#e0bd55 45%,#b08a20);-webkit-background-clip:text;background-clip:text;-webkit-text-stroke-color:#7a5c14;opacity:.66}
+.dark .anchor-card.devoted:after{opacity:.85;filter:none}
+.packet-row{display:flex;align-items:center;gap:11px;padding:12px 15px;border-top:1px solid var(--line)}
+.packet-row strong{font-size:13px;display:block}
+.packet-row small{font-size:11px;color:var(--muted);display:block;margin-top:2px}
 .live-picker-row .anchor-letter,.live-picker-row .anchor-art.placeholder{font-size:14px}
 .live-picker-row .grow{min-width:0}
 .live-picker-row strong{font-size:13px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -43,6 +69,9 @@ body.dark.amoled{--bg:#000;--soft:#161316;--line:#221f23}
 .anchor-switches .mini{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted,#7b8792)}
 .sched-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line)}
 .sched-row:last-child{border-bottom:none}
+/* The time stands on its own line with the weekday, date or notice lead under it; side by side they
+   read as one run-on string ("20:00 – 21:00周五 · 游戏回"). */
+.sched-row .grow strong{display:block;font-size:14px}
 .sched-img{margin-top:12px}
 .sched-img img{max-width:100%;border-radius:14px;border:1px solid var(--line)}
 
@@ -114,3 +143,90 @@ body.has-pet #app{padding-bottom:var(--pet-clearance,111px)}
 .pet-choice{width:52px;height:52px;border-radius:15px;border:2px solid transparent;background:var(--soft);display:flex;align-items:center;justify-content:center;padding:4px;min-height:0;overflow:hidden}
 .pet-choice img{width:100%;height:100%;object-fit:contain}
 .pet-choice.selected{border-color:var(--primary)}
+
+/* The schedule picture, opened big. The uploaded timetable is a large picture of small text, so
+   the sheet-width thumbnail is the one size it cannot be read at; this is a full-screen viewer
+   with pinch, drag and double-tap zoom over a single transformed <img>. */
+.img-viewer{position:fixed;inset:0;z-index:30;background:#0d141cf2;overflow:hidden;touch-action:none}
+.img-viewer[hidden]{display:none}
+.img-viewer img{position:absolute;left:0;top:0;max-width:none;transform-origin:0 0;user-select:none;-webkit-user-drag:none;will-change:transform}
+.img-viewer-bar{position:absolute;left:0;right:0;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;background:linear-gradient(#0b1219fa 58%,#0b121900)}
+.img-viewer-bar button{color:#eef3f7;min-height:42px}
+.img-viewer-close{width:44px;height:44px;border-radius:14px;background:#ffffff1f;display:grid;place-items:center;font-size:15px}
+.img-viewer-tools{display:flex;gap:8px}
+.img-viewer-tools button{font-size:12px;padding:0 12px;border-radius:12px;background:#ffffff2e}
+.img-viewer-hint{position:absolute;left:0;right:0;bottom:0;z-index:2;text-align:center;padding:12px;font-size:11px;color:#d7e2ea;background:linear-gradient(#0b121900,#0b1219fa 42%);pointer-events:none}
+.sched-img-open{position:relative;display:block;width:100%;padding:0;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--soft)}
+.sched-img-open img{display:block;width:100%;border:0;border-radius:0}
+/* The badge is the whole point: an unlabelled thumbnail gives no hint that it opens bigger. */
+.sched-img-open:after{content:'点击放大';position:absolute;right:8px;bottom:8px;background:#0b1219d0;color:#eef3f7;font-size:11px;padding:4px 9px;border-radius:10px}
+/* The 周表 picture row is a button: the tap target is the whole card, and a button defaults to
+   centred text, which would leave the name floating in the middle of the row. */
+.img-card{display:block;width:100%;text-align:left;padding:16px 18px}
+.img-card-copy strong{display:block;font-size:15px}
+.img-card .chevron{margin-left:0}
+/* Calendar rows: a dated arrangement carries its own day, and an ended one is visibly past. */
+.sched-badge{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--soft);color:var(--primary);white-space:nowrap}
+.sched-ended{opacity:.6}
+.sched-ended .sched-time{text-decoration:line-through}
+
+/* Which kind of arrangement a row is. The weekly table and a single day share one list and one
+   card, so the kind has to be written on the row: without it the two read as the same thing.
+   The accents are the app-wide pair — the repeating/regular family is blue, the one-off/special
+   family is amber — and the same pair marks the two rule lists on the 时段 page. */
+.sched-kind{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+.sched-kind .i{width:12px;height:12px;stroke-width:2.1}
+.sched-kind.weekly{background:var(--soft);color:var(--primary)}
+.sched-kind.once{background:var(--amber-bg);color:var(--amber)}
+/* A single day standing in a column of weekly rows keeps a rail, so it is findable while
+   scrolling and not only after reading every tag. */
+.sched-card.once{position:relative;overflow:hidden}
+.sched-card.once:before{content:'';position:absolute;left:0;top:21px;bottom:21px;width:3px;border-radius:0 3px 3px 0;background:var(--amber);opacity:.5}
+.sched-foot{justify-content:flex-start;gap:8px;flex-wrap:wrap}
+/* One line for the kind tag and the time; the kind chip must not wrap onto its own row. */
+.sched-kind-row{display:flex;align-items:center;gap:7px}
+.sched-kind-row strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The editor's one choice — repeat weekly, or only that day. */
+.kind-seg{margin-bottom:14px}
+.kind-seg button{display:flex;align-items:center;justify-content:center;gap:7px}
+.kind-seg .i{width:16px;height:16px}
+/* The two halves of one answer must not both look selected: the chosen one takes the accent. */
+.kind-seg button.selected{color:var(--primary)}
+/* The high-frequency rules are the same shape as the reminder windows, so they are told apart by
+   accent and by tag rather than by a different layout: amber times, a pace icon, a 高频 tag. */
+.time-card.high .rule-name .i{color:var(--amber)}
+.time-card.high .time-range{color:var(--amber)}
+.rule-tag{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber);white-space:nowrap}
+/* 舰包 = 舰长红包（0.1 折上舰红包）。Red because that is what it is, and named 舰包 so the two
+   characters fit the tag row the way 高频 does. */
+.rule-tag.packet{background:var(--red-bg);color:var(--red)}
+/* A chip that only reports something must not look like the ones that do something. */
+.chip.flat{background:var(--soft);border-color:transparent;color:var(--muted)}
+
+/* The trial build's raw-answer panel: the endpoint's own text, scrollable and small enough that it
+   cannot swamp the sheet it is shown in. */
+.probe{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin:10px 0 0;font-size:10px;line-height:1.5;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow:auto;color:var(--muted)}
+
+/* 排查卡：把「检测为什么停」按顺序摆出来。整块用琥珀色而不是报错红，因为它说的是待办，
+   不是故障判定；只有守候真的中断时，常驻通知卡才转红。 */
+.card.trouble{border-color:#e3c9a4;background:linear-gradient(180deg,#fffaf1,#fff)}
+.card.trouble .label-icon.amber{background:#f7e4c5;color:#946231}
+.card.trouble h3{font-size:15px}
+.trouble-list{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:13px}
+.trouble-list li{display:grid;grid-template-columns:21px minmax(0,1fr) auto;grid-template-areas:"n t a" "n b b";column-gap:10px;row-gap:3px;align-items:start;padding-top:13px;border-top:1px dashed #e8d7bb}
+.trouble-list li:first-child{border-top:0;padding-top:0}
+.trouble-list .grow{display:contents}
+.trouble-list strong{grid-area:t;display:block;font-size:13px;line-height:1.5}
+.trouble-list .sub{grid-area:b;margin-top:3px}
+.trouble-list .text-button{grid-area:a;align-self:start;flex-shrink:0;padding-top:2px}
+.trouble-n{grid-area:n;place-self:start;width:21px;height:21px;border-radius:50%;background:#f2ddba;color:#8a5c2a;font-size:11px;font-weight:740;display:grid;place-items:center;margin-top:1px}
+.dark .card.trouble{border-color:#6b5433;background:linear-gradient(180deg,#2c2620,#244)}
+.dark .card.trouble .label-icon.amber{background:#42341f;color:#e3bd86}
+.dark .trouble-list li{border-top-color:#4a4032}
+.dark .trouble-n{background:#42341f;color:#e3bd86}
+/* 守候通知卡在「服务没在跑 / 通知被拦」时转红，和排查卡对上号。 */
+.card.notice-alert{border-color:#dfa7a0;background:linear-gradient(180deg,#fff6f4,#fff)}
+.card.notice-alert .label-icon{background:#f8e0dc;color:#a9524a}
+.dark .card.notice-alert{border-color:#7a4a44;background:linear-gradient(180deg,#2e2422,#242c35)}
+.dark .card.notice-alert .label-icon{background:#452c29;color:#eab0a6}
+

@@ -52,10 +52,25 @@ python3 tools/build_apk.py \
   --keystore /path/to/your-release.p12 \
   --password-file /path/to/your-password.txt \
   --alias your-key-alias \
-  --output build/VRAlarm-1.1.9.apk
+  --output build/VRAlarm-<版本号>.apk
 ```
 
 默认使用 `javac`；只有 JRE 时可附加 `--ecj /path/to/ecj-3.39.0.jar`。流程依次执行 AAPT2、Java 编译、D8、zipalign 和 apksigner。密钥别名必须与密钥库里实际的别名一致（用 `keytool -list -keystore <文件> -storetype PKCS12` 查看），否则签名会以 `does not contain a key` 失败。
+
+## 两条线（1.3.0 与 1.2.0）
+
+同一个工作区同时构建两条线，**不需要第二份源码**：
+
+```bash
+# 1.3.0：全部功能（默认）
+python3 tools/build_apk.py … --version-code 51 --version-name 1.3.0 --output build/VRAlarm-1.3.0.apk
+# 1.2.0：同一份源码，构建时把「舰长红包」这项功能摘掉
+python3 tools/build_apk.py … --line 1.2.0 --version-code 52 --version-name 1.2.0 --output build/VRAlarm-1.2.0.apk
+```
+
+`--line 1.2.0` 会把 `app/src/main` 与 `ui-src/app.js` 各复制一份到 `build/manual/line-1.2.0*`，在副本上删掉该功能的五个类（`Packets`/`Wbi`/`DanmakuFrames`/`DanmakuClient`/`BiliAuth`），并按**精确锚点**剪掉所有调用处（`GuardianService` 的监听集合与通知通道、`MainActivity` 的试连动作、`BiliApi` 的取弹幕地址与解析、`Prefs` 的红包记忆、界面上的入口/标签/面板/试连按钮，以及只为它存在的红色标签 CSS）。每一处裁剪与替换都带断言，源文件改动导致锚点失配时**构建会直接报错**，不会产出半个功能；裁剪后再逐条检查 Java 与资源里是否还残留该功能的名字（`PACKET_CHANNEL`、`POPULARITY_RED_POCKET`、「舰长红包」、「舰包」等），有残留即失败。工作区本身始终不动。
+
+两条线的包名相同，因此不能并存：`versionCode` 只表示「谁能在谁上面覆盖安装」，与版本新旧无关（本轮 1.2.0 = 52、1.3.0 = 51，是为了能从 1.3.0 直接换到 1.2.0）。换回来需要重新构建一个更高的号，或先卸载。
 
 脚本开始时会清空 `build/manual/` 下的中间产物（`classes`、`gen`、`dex`、`resources.*`、`classes.jar`、`unsigned.apk`、`aligned.apk`）。在会拦截批量删除的环境里这一步可能被中止，构建尚未开始就退出；先手动执行 `node tools/clear_build.js` 清一遍即可，它清空的正是同一批路径。
 

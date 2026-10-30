@@ -174,6 +174,9 @@ public class MainActivity extends Activity {
         // itself. Both come from the same rule table the poll loop reads, so the page cannot show a
         // pace the loop is not keeping.
         Prefs.put(j,"highInside",prefs.highFrequencyNow());
+        // The second reason the pace may be the fast one: the phone is being used (screen on or
+        // charging). Reported separately so the card can say which of the two is in force.
+        Prefs.put(j,"deviceInUse",prefs.inUse());
         Prefs.put(j,"pollSecondsNow",prefs.pollSecondsNow());
         JSONObject c=prefs.config();Prefs.put(j,"zone",TimeRules.zone(c.optString("timezone")).getId());Prefs.put(j,"deviceZone",ZoneId.systemDefault().getId());
         Prefs.put(j,"now",System.currentTimeMillis());Prefs.put(j,"nextBoundary",TimeRules.nextBoundary(System.currentTimeMillis(),c.optBoolean("allDay"),prefs.windows(c),TimeRules.zone(c.optString("timezone"))));
@@ -198,7 +201,7 @@ public class MainActivity extends Activity {
     private String versionName(){
         try{String name=getPackageManager().getPackageInfo(getPackageName(),0).versionName;if(name!=null&&!name.isEmpty())return name;}
         catch(Exception ignored){}
-        return "1.1.9";
+        return "1.3.0";
     }
     private JSONObject permissions(){
         JSONObject p=new JSONObject();NotificationManager n=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);
@@ -259,6 +262,19 @@ public class MainActivity extends Activity {
                 prefs.log("system",enable?"已开启守候":"已停止守候",enable?"开始按你的时间规则守候 "+targets+" 位主播":"不再自动检测或响铃");return state();
             }
             case "refresh":refresh();return "正在检测直播状态";
+            case "suggestHighWindows":{
+                // Learned from the sessions already recorded per anchor; nothing is collected for it.
+                long[] starts=prefs.streamStarts(System.currentTimeMillis()-30L*24*3600*1000L);
+                JSONObject c=prefs.config();
+                int[] histogram=StreamHours.histogram(starts,TimeRules.zone(c.optString("timezone")));
+                int[][] windows=StreamHours.suggest(histogram,starts.length);
+                JSONObject out=new JSONObject();Prefs.put(out,"samples",starts.length);
+                if(windows==null){Prefs.put(out,"ok",false);return out;}
+                JSONArray list=new JSONArray();
+                for(int[] window:windows){JSONObject o=new JSONObject();Prefs.put(o,"start",window[0]);Prefs.put(o,"end",window[1]);list.put(o);}
+                Prefs.put(out,"ok",true);Prefs.put(out,"coverage",StreamHours.coveragePercent(histogram,starts.length,windows));
+                Prefs.put(out,"windows",list);return out;
+            }
             case "pickBackground":{
                 // The answer must wait for the import: replying here would tell the page the
                 // background changed before the picker even opened, so a failed import looked
@@ -282,6 +298,9 @@ public class MainActivity extends Activity {
             case "openAlarm":if(GuardianService.ringing)startActivity(new Intent(this,AlarmActivity.class));return true;
             case "openLive":{
                 Anchors.Anchor live=anchorArg(data);
+                // The ringing page may open the room on its own after a short countdown; the record
+                // is written here so both ways of opening leave the same trace.
+                if(data.optBoolean("auto"))prefs.log("live","已自动进入直播间",live.name+" 的直播间（开播后自动进入）");
                 if(alarmPage()&&GuardianService.running)GuardianService.send(this,"DISMISS");
                 openLive(live.room);if(alarmPage())finish();return true;
             }
@@ -312,6 +331,22 @@ public class MainActivity extends Activity {
                 });
                 return DEFERRED;
             }
+            case "probeDanmaku":{
+                // The trial build's own instrument: whether this device can see a room's red-packet
+                // broadcasts is answered by the device itself. The button listens for a minute and
+                // reports every command it received, any red packet verbatim — a packet is only
+                // broadcast at the moment it is created, so a quiet minute is not proof there is none.
+                Anchors.Anchor a=anchorArg(data);
+                final long room=a.room;final String back=requestId;
+                io.execute(()->{
+                    Object value;boolean ok=true;
+                    try{value=DanmakuClient.probe(room,60);}
+                    catch(Exception e){ok=false;value=errorText(e);}
+                    final boolean succeeded=ok;final Object payload=value;
+                    runOnUiThread(()->reply(back,succeeded,payload));
+                });
+                return DEFERRED;
+            }
             case "saveAnchor":{
                 JSONObject o=data.getJSONObject("anchor");
                 String id=o.optString("id","");
@@ -319,9 +354,14 @@ public class MainActivity extends Activity {
                 // detection toggle from older callers must not silently re-ring a muted anchor.
                 Anchors.Anchor previous=Anchors.find(prefs.anchors(),Anchors.validId(id)?id:"");
                 boolean alarm=o.has("alarm")?o.optBoolean("alarm",true):previous==null||previous.alarm;
+                // Same rule for the red-packet watch, which is opt-in: a payload that does not carry
+                // the flag keeps whatever the room had, so an older caller cannot turn it on or off.
+                boolean packet=o.has("packet")?o.optBoolean("packet",false):previous!=null&&previous.packet;
+                // 考子闹钟 travels the same way: absent means "leave it as it was".
+                boolean allDay=o.has("allDay")?o.optBoolean("allDay",false):previous!=null&&previous.allDay;
                 Anchors.Anchor updated=new Anchors.Anchor(Anchors.validId(id)?id:UUID.randomUUID().toString(),
                     Anchors.fitName(o.optString("name","")),Prefs.uidOf(o),o.optLong("room",0),
-                    o.optBoolean("enabled",true),alarm);
+                    o.optBoolean("enabled",true),alarm,packet,allDay);
                 List<Anchors.Anchor> list=prefs.anchors();
                 int at=Anchors.findIndex(list,updated.id);
                 if(at<0)list.add(updated);else list.set(at,updated);
@@ -445,6 +485,8 @@ public class MainActivity extends Activity {
             JSONObject o=new JSONObject();
             Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"uidText",x.uidText);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);
             Prefs.put(o,"alarm",x.alarm);
+            // Both opt-in flags have to travel: leaving one out made the editor show it as off again.
+            Prefs.put(o,"packet",x.packet);Prefs.put(o,"allDay",x.allDay);
             Prefs.put(o,"snapshot",prefs.snapshot(x.id));Prefs.put(o,"avatar",AnchorArt.existing(this,x.id)!=null);
             Prefs.put(o,"schedule",scheduleEntries(prefs.schedule(x.id)));Prefs.put(o,"scheduleImage",AnchorArt.scheduleImage(this,x.id)!=null);Prefs.put(o,"scheduleImageRevision",AnchorArt.scheduleImageRevision(this,x.id));
             Prefs.put(o,"stats",statSummary(x.id));
@@ -459,7 +501,7 @@ public class MainActivity extends Activity {
     /** Definitions only: a backup carries the list, not the observation of the moment. */
     private JSONArray anchorList(){
         JSONArray all=new JSONArray();
-        for(Anchors.Anchor x:prefs.anchors()){JSONObject o=new JSONObject();Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"uidText",x.uidText);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);Prefs.put(o,"alarm",x.alarm);all.put(o);}
+        for(Anchors.Anchor x:prefs.anchors()){JSONObject o=new JSONObject();Prefs.put(o,"id",x.id);Prefs.put(o,"name",x.name);Prefs.put(o,"uid",x.uid);Prefs.put(o,"uidText",x.uidText);Prefs.put(o,"room",x.room);Prefs.put(o,"enabled",x.enabled);Prefs.put(o,"alarm",x.alarm);Prefs.put(o,"packet",x.packet);Prefs.put(o,"allDay",x.allDay);all.put(o);}
         return all;
     }
     /** Weekly/monthly counts and the latest session, computed from the local record only. */
@@ -489,7 +531,9 @@ public class MainActivity extends Activity {
         if(a==null)return list;
         for(int i=0;i<a.length();i++){
             JSONObject o=a.optJSONObject(i);if(o==null)continue;
-            list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),Prefs.uidOf(o),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true)));
+            // A restored backup has to come back with both opt-ins intact: rebuilding the anchor
+            // without them quietly turned red-packet and 考子闹钟 anchors off on every restore.
+            list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),Prefs.uidOf(o),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true),o.optBoolean("packet",false),o.optBoolean("allDay",false)));
         }
         return Anchors.sanitize(list);
     }

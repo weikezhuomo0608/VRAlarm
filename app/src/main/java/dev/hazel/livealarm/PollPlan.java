@@ -49,8 +49,18 @@ public final class PollPlan {
      * "paused" (rather than quietly looking healthy) is what lets the UI say so out loud.
      */
     public static Duty duty(boolean enabled, boolean allDay, boolean hasEnabledWindow, boolean insideWindow) {
+        return duty(enabled,allDay,hasEnabledWindow,insideWindow,false);
+    }
+    /**
+     * The same question with the per-anchor 考子闹钟: one anchor may ask to be watched around the
+     * clock regardless of the windows. The loop has to be running for that anchor to be watched at
+     * all, so this opens the schedule for the whole watch — which streams may still ring is asked
+     * per anchor (see LiveGate's Schedule), and only the anchor that asked gets the wider answer.
+     */
+    public static Duty duty(boolean enabled, boolean allDay, boolean hasEnabledWindow, boolean insideWindow,
+                            boolean anchorAllDay) {
         if (!enabled) return Duty.OFF;
-        if (allDay) return Duty.WATCHING;
+        if (allDay || anchorAllDay) return Duty.WATCHING;
         if (!hasEnabledWindow) return Duty.PAUSED;
         return insideWindow ? Duty.WATCHING : Duty.PAUSED;
     }
@@ -77,16 +87,58 @@ public final class PollPlan {
      * runs at all is duty()'s question, and these windows never widen it.
      */
     public static final int LOW_FREQUENCY_SECONDS=120;
+    /** The slow paces the interface offers, in seconds: how much battery the quiet hours may cost.
+     *  The fastest of them is thirty seconds — a stream nobody announced is the whole point of this
+     *  alarm, and the batched cycle (one request for every anchor) made the floor cheap to lower. */
+    public static final int[] LOW_FREQUENCY_CHOICES={30,60,120,300};
 
     /**
      * The interval a cycle should plan for. Inside a high-frequency window the configured pace is
      * kept; outside them the pace is raised to the slow floor, so a setting faster than the floor
      * cannot make the slow hours expensive. With the option off this is exactly the configured
      * value — no existing install changes pace.
+     *
+     * The floor is a parameter because the user chooses it (two, three or five minutes); an
+     * unusable value falls back to the default rather than producing a hot loop.
      */
+    /** The same question with the default slow pace, for callers that have no configured one. */
     public static int effectivePollSeconds(int pollSeconds, boolean highFrequency, boolean insideHighWindow) {
-        if (!highFrequency || insideHighWindow) return pollSeconds;
-        return pollSeconds>LOW_FREQUENCY_SECONDS?pollSeconds:LOW_FREQUENCY_SECONDS;
+        return effectivePollSeconds(pollSeconds,highFrequency,insideHighWindow,LOW_FREQUENCY_SECONDS);
+    }
+    public static int effectivePollSeconds(int pollSeconds, boolean highFrequency, boolean insideHighWindow,int lowSeconds) {
+        return effectivePollSeconds(pollSeconds,highFrequency,insideHighWindow,lowSeconds,false);
+    }
+    /**
+     * `outsideWindows` is true while the loop runs only because a 考子 anchor asked for it — the hours
+     * outside the reminder windows. Nobody is expecting a reminder then, so the slow floor applies
+     * without the user having to switch the pacing option on: a 考子 anchor still catches a surprise
+     * stream, just not at the price of a full-pace night. A high-frequency window, or the phone being
+     * in use, still counts as "the user asked for speed" and keeps the configured pace.
+     */
+    public static int effectivePollSeconds(int pollSeconds, boolean highFrequency, boolean insideHighWindow,int lowSeconds,boolean outsideWindows) {
+        if (insideHighWindow) return pollSeconds;
+        if (!highFrequency && !outsideWindows) return pollSeconds;
+        int floor=lowSeconds>0?lowSeconds:LOW_FREQUENCY_SECONDS;
+        return pollSeconds>floor?pollSeconds:floor;
+    }
+    /** Slack added to the pace when the safety net *is* the loop, so a healthy loop still replaces it. */
+    public static final int NET_MARGIN_SECONDS=30;
+
+    /**
+     * How long until the safety-net alarm, for a loop planning `pollSeconds`.
+     *
+     * Inside the reminder windows the loop runs on its own, and in continuous mode the lock keeps the
+     * phone awake for it, so the alarm only has to catch a loop that stalled — half an interval of
+     * slack behind the plan (turboNetSeconds). Outside the windows the loop exists only because of a
+     * 考子 anchor and the phone is allowed to sleep between checks: there the alarm is not a net
+     * behind the loop, it *is* the loop, so it sits at the pace itself and the device sleeps in
+     * between. The saver (non-continuous) value stays three intervals either way — it is how that
+     * mode is defined.
+     */
+    public static int netSeconds(int pollSeconds,boolean continuous,boolean outsideWindows){
+        if(!continuous) return keepAliveSeconds(pollSeconds,true);
+        if(outsideWindows) return pollSeconds+NET_MARGIN_SECONDS;
+        return turboNetSeconds(pollSeconds);
     }
 
     /**
@@ -98,10 +150,10 @@ public final class PollPlan {
      */
     public static final int SOON_BEFORE_MINUTES=30, SOON_AFTER_MINUTES=30;
     /**
-     * How early the weekly-schedule heads-up is armed. nextStart() subtracts it to produce the
-     * alarm moment, and callers add it back to recover the start they display. Keeping it in one
-     * place is what stops those two conversions from drifting apart — when they did, the heads-up
-     * announced a start five minutes later than the weekly schedule actually said.
+     * The default notice lead, used by entries that do not carry one of their own. It is no longer
+     * applied anywhere else: nextOccurrence() returns the start and the arm moment together, and
+     * both callers store what they were given. When the lead was subtracted in one place and added
+     * back in another, the heads-up announced a start five minutes later than the schedule said.
      */
     public static final long PRESTREAM_LEAD_MILLIS=5*60000L;
     /** weekdayZeroBased: 0=Monday; startOfDayMillis is today's 00:00 in the reminder zone. */
@@ -114,22 +166,47 @@ public final class PollPlan {
         }
         return false;
     }
-    /** Earliest scheduled start minus lead, scanning the whole week ahead; 0 when none upcoming.
-     *  Scanning all seven days matters: from Saturday, next Friday's slot is six days out, and
-     *  a two-day window would leave its pre-stream alarm unarmed until the cycle happened to
-     *  cross into the window. */
-    public static long nextStart(java.util.List<Schedule.Entry> entries,int weekdayToday,long startOfTodayMillis,long nowMillis,long leadMillis){
-        long best=0;
-        for(int off=0;off<7;off++){
-            int wd=(weekdayToday+off)%7;
-            long dayStart=startOfTodayMillis+off*86400000L;
-            for(Schedule.Entry e:entries){
-                if(!Schedule.on(e,wd))continue;
-                long at=dayStart+e.start*60000L-leadMillis;
-                if(at>nowMillis&&(best==0||at<best))best=at;
+    /**
+     * The next scheduled moment and the moment to be told about it, as {startAt, armAt}; null when
+     * nothing is coming up.
+     *
+     * Weekly rules are scanned over the coming seven days — from Saturday, next Friday's slot is six
+     * days out, and a two-day window would leave its heads-up unarmed until a cycle happened to
+     * cross into it. A one-off entry has exactly one moment, which may be further out than a week
+     * (that is the point of a calendar), and arming that far ahead is harmless: every cycle re-arms
+     * the alarm and the receiver ignores a fire that no longer matches the stored moment.
+     *
+     * Each entry may carry its own notice lead; 0 means the default. `armAt` is returned rather than
+     * computed by the callers: the lead used to be subtracted in one place and added back in
+     * another, and those two conversions drift apart the moment the lead stops being a constant.
+     */
+    public static long[] nextOccurrence(java.util.List<Schedule.Entry> entries,java.time.LocalDate today,
+                                        long startOfTodayMillis,java.time.ZoneId zone,long nowMillis,long defaultLeadMillis){
+        long bestStart=0,bestArm=0;
+        if(entries==null||today==null)return null;
+        for(Schedule.Entry e:entries){
+            long start=0;
+            java.time.LocalDate own=Schedule.dateOf(e);
+            if(own!=null){
+                if(own.isBefore(today))continue;
+                start=own.atStartOfDay(zone).toInstant().toEpochMilli()+e.start*60000L;
+            }else{
+                for(int off=0;off<7;off++){
+                    java.time.LocalDate day=today.plusDays(off);
+                    if((e.days&(1<<(day.getDayOfWeek().getValue()-1)))==0)continue;
+                    long candidate=startOfTodayMillis+off*86400000L+e.start*60000L;
+                    if(candidate>nowMillis){start=candidate;break;}
+                }
             }
+            if(start<=nowMillis)continue;
+            long lead=e.lead>0?e.lead*60000L:defaultLeadMillis;
+            long arm=start-lead;
+            // A start already inside its own notice window is not announced any more; the old
+            // seven-day scan skipped it the same way.
+            if(arm<=nowMillis)continue;
+            if(bestArm==0||arm<bestArm){bestArm=arm;bestStart=start;}
         }
-        return best;
+        return bestArm==0?null:new long[]{bestStart,bestArm};
     }
     /** Floor for the safety net, so a short poll interval cannot turn it into a hot loop. */
     public static final int MIN_KEEPALIVE_SECONDS=90;

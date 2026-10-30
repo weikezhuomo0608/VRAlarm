@@ -1,13 +1,15 @@
 package dev.hazel.livealarm;
 
 import android.content.*;
+import android.os.*;
 import org.json.*;
 import java.util.*;
 import java.time.*;
 
 public final class Prefs {
     private final SharedPreferences db;
-    public Prefs(Context c){db=c.getSharedPreferences("hazel",Context.MODE_PRIVATE);}
+    private final Context app;
+    public Prefs(Context c){app=c.getApplicationContext();db=app.getSharedPreferences("hazel",Context.MODE_PRIVATE);}
     public SharedPreferences raw(){return db;}
     public static void put(JSONObject j,String key,Object value){try{j.put(key,value);}catch(JSONException e){throw new IllegalArgumentException(e);}}
     /**
@@ -39,6 +41,10 @@ public final class Prefs {
         // default, so upgrading changes nobody's pace. The three defaults are the hours the user
         // named (08:00-12:00, 14:00-16:00, 20:00-00:00) and stay editable.
         put(j,"highFrequency",false);
+        // How slow the quiet hours may poll; the user picks between two, three and five minutes.
+        put(j,"lowPollSeconds",PollPlan.LOW_FREQUENCY_SECONDS);
+        // What happens around the alarm itself: walking into the room, and being told it ended.
+        put(j,"autoOpenLive",false); put(j,"endNotice",false);
         JSONArray high=new JSONArray();
         high.put(highWindow("h1","上午高频",480,720));
         high.put(highWindow("h2","下午高频",840,960));
@@ -61,8 +67,9 @@ public final class Prefs {
     }
     public synchronized void update(JSONObject patch) throws JSONException {
         JSONObject j=config();
-        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery","turbo","pet","highFrequency"};
+        String[] bools={"allDay","catchUp","reliable","boot","ramp","vibrate","quietCalls","soundWithoutNotifications","aiOcr","preStream","ringQueue","amoled","hideRecents","recovery","turbo","pet","highFrequency","autoOpenLive","endNotice"};
         for(String k:bools) if(patch.has(k)){if(!(patch.get(k) instanceof Boolean))throw new JSONException("开关值无效");put(j,k,patch.getBoolean(k));}
+        choiceInt(j,patch,"lowPollSeconds",PollPlan.LOW_FREQUENCY_CHOICES);
         intSetting(j,patch,"volume",1,100);intSetting(j,patch,"backgroundDim",0,90);intSetting(j,patch,"cardOpacity",75,100);
         if(patch.has("seedColor")){String color=patch.getString("seedColor").trim();if(!color.isEmpty()&&!color.matches("#[0-9a-fA-F]{6}"))throw new JSONException("请输入六位 HEX 颜色，如 #536B81");put(j,"seedColor",color.toUpperCase(java.util.Locale.ROOT));}
         choiceInt(j,patch,"pollSeconds",new int[]{15,30,60,120});
@@ -114,7 +121,18 @@ public final class Prefs {
         for(int i=0;i<a.length();i++){JSONObject w=a.optJSONObject(i);try{list.add(new TimeRules.Window(w.optString("id"),w.optString("name"),w.optInt("start"),w.optInt("end"),w.optInt("days"),w.optBoolean("enabled")));}catch(Exception ignored){}}
         return list;
     }
-    public boolean allowed(long now){JSONObject c=config();return TimeRules.contains(now,c.optBoolean("allDay"),windows(c),TimeRules.zone(c.optString("timezone")));}
+    public boolean allowed(long now){
+        JSONObject c=config();
+        // A 考子闹钟 anchor may ring at any hour, so the app-level answer is open while one exists;
+        // whether a *particular* stream may ring is still asked per anchor (see the LiveGate call).
+        if(anchorAllDay())return true;
+        return TimeRules.contains(now,c.optBoolean("allDay"),windows(c),TimeRules.zone(c.optString("timezone")));
+    }
+    /** Whether any enabled anchor asked to be watched around the clock (its own 考子闹钟). */
+    public boolean anchorAllDay(){
+        for(Anchors.Anchor a:anchors())if(a.enabled&&a.allDay)return true;
+        return false;
+    }
     /**
      * Whether the schedule lets the watch run at all right now. Every entry point reads this one
      * answer — the poll loop, the keep-alive chain, the watchdog, the recovery check, the
@@ -128,7 +146,7 @@ public final class Prefs {
         boolean allDay=c.optBoolean("allDay");
         List<TimeRules.Window> windows=windows(c);
         boolean inside=TimeRules.contains(now,allDay,windows,TimeRules.zone(c.optString("timezone")));
-        return PollPlan.duty(enabled(),allDay,TimeRules.hasWindow(windows),inside)==PollPlan.Duty.WATCHING;
+        return PollPlan.duty(enabled(),allDay,TimeRules.hasWindow(windows),inside,anchorAllDay())==PollPlan.Duty.WATCHING;
     }
     /**
      * Whether the pace right now is the fast one: the option is switched on AND the moment falls
@@ -141,10 +159,52 @@ public final class Prefs {
         if(!c.optBoolean("highFrequency",false))return false;
         return TimeRules.contains(System.currentTimeMillis(),false,windows(c,"highWindows"),TimeRules.zone(c.optString("timezone")));
     }
+    /**
+     * Whether the phone is in use right now: the screen is on, or it is charging. A stream nobody
+     * announced is the one this alarm exists for, and those are exactly the moments when the phone is
+     * already awake — being looked at, or plugged in on a desk — so the extra checks cost little.
+     * Only ever consulted while the pacing option is on; see pollSeconds.
+     */
+    public boolean inUse(){
+        try{
+            PowerManager power=(PowerManager)app.getSystemService(Context.POWER_SERVICE);
+            if(power!=null&&power.isInteractive())return true;
+            BatteryManager battery=(BatteryManager)app.getSystemService(Context.BATTERY_SERVICE);
+            return battery!=null&&battery.isCharging();
+        }catch(Exception e){return false;}
+    }
+    /** Whether the reminder windows are open right now, ignoring any 考子 anchor. The windows are
+     *  what the wake lock and the slow floor follow; 考子 only decides that the loop keeps running. */
+    public boolean insideWindows(long now){
+        JSONObject c=config();
+        return TimeRules.contains(now,c.optBoolean("allDay"),windows(c),TimeRules.zone(c.optString("timezone")));
+    }
     /** The interval the poll loop should plan for at this moment. See PollPlan.effectivePollSeconds. */
     public int pollSecondsNow(){return pollSeconds(config());}
     public int pollSeconds(JSONObject c){
-        return PollPlan.effectivePollSeconds(c.optInt("pollSeconds",30),c.optBoolean("highFrequency",false),highFrequency(c));
+        // Inside a high-frequency window OR with the phone in use, the configured pace is kept; the
+        // slow floor only applies when neither is true. With the option off the formula ignores both,
+        // so no existing install changes pace by itself — except outside the reminder windows, where
+        // the loop is alive only because a 考子 anchor asked for it and the floor applies on its own.
+        return PollPlan.effectivePollSeconds(c.optInt("pollSeconds",30),c.optBoolean("highFrequency",false),
+            highFrequency(c)||inUse(),c.optInt("lowPollSeconds",PollPlan.LOW_FREQUENCY_SECONDS),
+            !insideWindows(System.currentTimeMillis()));
+    }
+    /** Every recorded stream start of every anchor since a moment, for the hour histogram. */
+    public long[] streamStarts(long sinceMillis){
+        ArrayList<Long> found=new ArrayList<>();
+        for(Anchors.Anchor a:anchors()){
+            JSONArray rows=array(db.getString("stats."+a.id,"[]"));
+            for(int i=0;i<rows.length();i++){
+                JSONObject row=rows.optJSONObject(i);
+                if(row==null)continue;
+                long start=row.optLong("s",0);
+                if(start>=sinceMillis)found.add(start);
+            }
+        }
+        long[] out=new long[found.size()];
+        for(int i=0;i<out.length;i++)out[i]=found.get(i);
+        return out;
     }
 
     public boolean enabled(){return db.getBoolean("enabled",false);}
@@ -165,7 +225,7 @@ public final class Prefs {
             JSONArray a=new JSONArray(text);
             for(int i=0;i<a.length();i++){
                 JSONObject o=a.optJSONObject(i);if(o==null)continue;
-                list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),uidOf(o),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true)));
+                list.add(new Anchors.Anchor(o.optString("id"),o.optString("name"),uidOf(o),o.optLong("room"),o.optBoolean("enabled",true),o.optBoolean("alarm",true),o.optBoolean("packet",false),o.optBoolean("allDay",false)));
             }
         }catch(Exception e){return new ArrayList<>();}
         return list;
@@ -173,7 +233,7 @@ public final class Prefs {
     public synchronized void saveAnchors(List<Anchors.Anchor> list){
         Anchors.validate(list);
         JSONArray a=new JSONArray();
-        for(Anchors.Anchor x:list){JSONObject o=new JSONObject();put(o,"id",x.id);put(o,"name",x.name);put(o,"uid",x.uid);put(o,"uidText",x.uidText);put(o,"room",x.room);put(o,"enabled",x.enabled);put(o,"alarm",x.alarm);a.put(o);}
+        for(Anchors.Anchor x:list){JSONObject o=new JSONObject();put(o,"id",x.id);put(o,"name",x.name);put(o,"uid",x.uid);put(o,"uidText",x.uidText);put(o,"room",x.room);put(o,"enabled",x.enabled);put(o,"alarm",x.alarm);put(o,"packet",x.packet);put(o,"allDay",x.allDay);a.put(o);}
         db.edit().putString("anchors",a.toString()).commit();
     }
     public Anchors.Anchor anchor(String id){return Anchors.find(anchors(),id);}
@@ -220,7 +280,8 @@ public final class Prefs {
             JSONArray a=new JSONArray(text);
             for(int i=0;i<a.length();i++){
                 JSONObject o=a.optJSONObject(i);if(o==null)continue;
-                list.add(new Schedule.Entry(o.optString("id"),o.optInt("days"),o.optInt("start"),o.optInt("end",-1),o.optString("note","")));
+                list.add(new Schedule.Entry(o.optString("id"),o.optInt("days"),o.optInt("start"),o.optInt("end",-1),o.optString("note",""),
+                    o.optString("date",""),o.optInt("lead",0)));
             }
         }catch(Exception e){return new ArrayList<>();}
         return list;
@@ -228,7 +289,7 @@ public final class Prefs {
     public synchronized void saveSchedule(String id,List<Schedule.Entry> list){
         Schedule.validate(list);
         JSONArray a=new JSONArray();
-        for(Schedule.Entry e:list){JSONObject o=new JSONObject();put(o,"id",e.id);put(o,"days",e.days);put(o,"start",e.start);put(o,"end",e.end);put(o,"note",e.note==null?"":e.note);a.put(o);}
+        for(Schedule.Entry e:list){JSONObject o=new JSONObject();put(o,"id",e.id);put(o,"days",e.days);put(o,"start",e.start);put(o,"end",e.end);put(o,"note",e.note==null?"":e.note);put(o,"date",e.date==null?"":e.date);put(o,"lead",e.lead);a.put(o);}
         db.edit().putString("schedule."+id,a.toString()).commit();
     }
     /** The raw text the entries came from, kept so the user can re-edit without re-fetching. */
@@ -311,6 +372,43 @@ public final class Prefs {
         return cut<0?raw:raw.substring(cut+1);
     }
     public void clearSnoozeKeys(){db.edit().putLong("snoozeAt",0).putString("snoozeSession","").apply();}
+
+    // ---- guard red packets: which ones this device has already announced, per anchor ----
+
+    /**
+     * The packet ids already announced for one anchor, pruned by age, so nothing is announced twice
+     * while the store cannot grow without bound. An id also has to be remembered after a reboot,
+     * which is why this lives in storage rather than in memory.
+     */
+    public synchronized List<String> announcedPackets(String id){
+        ArrayList<String> ids=new ArrayList<>();ArrayList<Long> at=new ArrayList<>();
+        JSONArray a=array(db.getString("packets."+id,"[]"));
+        for(int i=0;i<a.length();i++){
+            JSONObject r=a.optJSONObject(i);if(r==null)continue;
+            String one=r.optString("id","");
+            if(one.isEmpty())continue;
+            ids.add(one);at.add(r.optLong("at",0));
+        }
+        return Packets.prune(ids,at,System.currentTimeMillis());
+    }
+    /** Remember what was just announced. Existing ids keep their original moment, so pruning measures
+     *  how long ago a packet was *seen*, not how long ago this anchor was checked. */
+    public synchronized void rememberPackets(String id,List<Packets.Item> items){
+        long now=System.currentTimeMillis();
+        LinkedHashMap<String,Long> kept=new LinkedHashMap<>();
+        JSONArray a=array(db.getString("packets."+id,"[]"));
+        for(int i=0;i<a.length();i++){
+            JSONObject r=a.optJSONObject(i);if(r==null)continue;
+            String one=r.optString("id","");long at=r.optLong("at",0);
+            if(one.isEmpty()||now-at>Packets.SEEN_MILLIS)continue;
+            kept.put(one,at);
+        }
+        if(items!=null)for(Packets.Item item:items)if(item!=null&&item.usable())kept.putIfAbsent(item.id,now);
+        JSONArray out=new JSONArray();
+        for(Map.Entry<String,Long> e:kept.entrySet()){JSONObject r=new JSONObject();put(r,"id",e.getKey());put(r,"at",e.getValue());out.put(r);}
+        db.edit().putString("packets."+id,out.toString()).apply();
+    }
+    /** When this anchor's packets were last asked for, so the pace is kept per room. */
 
     // ---- per-anchor stream history for the statistics shown on the anchor cards ----
 

@@ -5,6 +5,35 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const { chromium } = require('playwright');
+const zlib = require('node:zlib');
+
+/**
+ * A timetable-sized PNG, generated rather than embedded. The viewer's whole job is zooming into a
+ * picture that is bigger than the screen, so a 1x1 stand-in would make its arithmetic vacuous:
+ * the fit scale would be hundreds of times 1 and 「原始大小」 would clamp back to the fit.
+ */
+function makeSchedulePng(w, h) {
+    const raw = Buffer.alloc((w * 3 + 1) * h);
+    for (let y = 0; y < h; y++) {
+        raw[y * (w * 3 + 1)] = 0;
+        for (let x = 0; x < w; x++) {
+            const o = y * (w * 3 + 1) + 1 + x * 3;
+            raw[o] = (x * 7) % 256; raw[o + 1] = (y * 5) % 256; raw[o + 2] = 140;
+        }
+    }
+    const chunk = (type, data) => {
+        const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+        const len = Buffer.alloc(4); len.writeUInt32BE(data.length >>> 0);
+        const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(body) >>> 0);
+        return Buffer.concat([len, body, crc]);
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+    ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+    return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+const SCHEDULE_PNG = makeSchedulePng(520, 760);
 
 const assets = path.resolve(process.env.HAZEL_TEST_ASSETS || path.join(__dirname, '../app/src/main/assets'));
 const legacy = process.argv.includes('--legacy');
@@ -14,9 +43,15 @@ const server = http.createServer((req, res) => {
     const name = new URL(req.url, 'http://localhost').pathname.slice(1) || 'index.html';
     // The app serves anchor art from its own /avatar/ route; the real 1x1 PNG here is what lets
     // the scenarios assert that images actually render instead of degrading to placeholders.
-    if (name.startsWith('avatar/') || name.startsWith('schedule/') || name === 'background/current') {
+    if (name.startsWith('avatar/') || name === 'background/current') {
         res.setHeader('Content-Type', 'image/png');
         res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+        return;
+    }
+    // Only the schedule picture needs real dimensions: it is the one the viewer zooms into.
+    if (name.startsWith('schedule/')) {
+        res.setHeader('Content-Type', 'image/png');
+        res.end(SCHEDULE_PNG);
         return;
     }
     // The pet art ships inside assets/pet/; the real app serves it from its
@@ -39,7 +74,7 @@ function installMock() {
         config: { soundWithoutNotifications: false, allDay: true, timezone: 'device', catchUp: false, pollSeconds: 30,
             reliable: true, boot: true, ringtone: 'starlight', customName: '未选择', volume: 85, aiOcr: true, aiKey: 'sk-test', aiModel: 'deepseek-flash', preStream: true, ringQueue: false,
             seedColor: '', amoled: false, hideRecents: false, recovery: true, turbo: true, backgroundDim: 40, cardOpacity: 94,
-            pet: true, petCharacter: 'manqu', silentUntil: 0, highFrequency: false,
+            pet: true, petCharacter: 'manqu', silentUntil: 0, highFrequency: false, lowPollSeconds: 120, autoOpenLive: false, endNotice: false,
             highWindows: [{ id: 'h1', name: '上午高频', start: 480, end: 720, days: 127, enabled: true },
                 { id: 'h2', name: '下午高频', start: 840, end: 960, days: 127, enabled: true },
                 { id: 'h3', name: '晚间高频', start: 1200, end: 0, days: 127, enabled: true }],
@@ -108,6 +143,12 @@ function installMock() {
                 { id: 'Asia/Tokyo', offset: '+09:00', time: '23:00' },
                 { id: 'America/New_York', offset: '-04:00', time: '10:00' }
             ]), 0); return;
+        }
+        if (action === 'probeDanmaku') {
+            mock.probes = (mock.probes || 0) + 1;
+            setTimeout(() => reply(id, '已连上弹幕服务器，正在鉴权\n鉴权通过，正在听这个房间\n收到的命令（去重）：DANMU_MSG、POPULARITY_RED_POCKET_V2_START\n'
+                + '红包广播原文：\n{"cmd":"POPULARITY_RED_POCKET_V2_START","data":{"lot_id":1,"rp_type":2,"sender_name":"某个老板"}}'), 0);
+            return;
         }
         if (action === 'saveAnchor') {
             const incoming = patch.anchor;
@@ -183,8 +224,19 @@ function installMock() {
         if (action === 'test') { state.ringing=true;state.alarmTest=true;state.alarmUntil=Date.now()+60000; }
         if (action === 'testLater') state.testAt=Date.now()+15000;
         if (action === 'dismiss') state.ringing=false;
-        if (action === 'openLive') (mock.opened || (mock.opened = [])).push(patch.id);
+        if (action === 'openLive') {
+            (mock.opened || (mock.opened = [])).push(patch.id);
+            // The whole payload is kept separately: the ringing page's automatic step is told apart
+            // from a tap by the flag it sends, and the older id-only assertion keeps working.
+            (mock.openedPatches || (mock.openedPatches = [])).push(clone(patch));
+        }
         if (action === 'cancelTest') state.testAt=0;
+        if (action === 'suggestHighWindows') {
+            mock.suggested = (mock.suggested || 0) + 1;
+            if (mock.fewSamples) { setTimeout(() => reply(id, { ok: false, samples: 3 }), 0); return; }
+            setTimeout(() => reply(id, { ok: true, samples: 17, coverage: 82,
+                windows: [{ start: 480, end: 660 }, { start: 1200, end: 1380 }] }), 0); return;
+        }
         if (action === 'permission') mock.lastPermission = patch.kind;
         if (action === 'exportNotificationReport') mock.lastReportOptions = patch;
         if (action === 'notificationProbe') {
@@ -361,7 +413,7 @@ function installMock() {
                 await reset('schedule');
                 const copy = await page.locator('#content').innerText();
                 // The page promises a five minute heads-up; the wording must name that window.
-                assert.match(copy, /按周表预告提醒/);
+                assert.match(copy, /按日程预告提醒/);
                 assert.match(copy, /开播前 5 分钟/);
                 assert.match(copy, /不响铃/);
                 assert.equal(await page.locator('[data-toggle="preStream"]').getAttribute('aria-checked'), 'true');
@@ -754,7 +806,7 @@ function installMock() {
                 });
                 await page.locator('[data-route="week"]').last().click();
                 const copy = await page.locator('#content').innerText();
-                assert.match(copy, /WEEKLY TIMELINE/);
+                assert.match(copy, /YOUR CALENDAR/);
                 assert.match(copy, /游戏/);
                 assert.match(copy, /20:00 – 21:00/);
                 assert.match(copy, /今天/);
@@ -859,11 +911,17 @@ function installMock() {
                 const texts = await page.evaluate(() => __mock.lastScheduleText);
                 assert.match(texts.text, /游戏回/);
             });
-            await test('an added schedule entry flows through the weekday picker', async () => {
+            await test('an added schedule entry is a day, with no kind to choose', async () => {
                 await reset('anchors');
                 await page.locator('[data-anchor-schedule="other"]').click();
-                await page.locator('#schedule-editor [data-sched-weekday="0"]').click();
-                await page.locator('#schedule-editor [data-sched-weekday="2"]').click();
+                // The kind picker and its weekday rail are gone on purpose: a manually added entry is
+                // always one day, and the repeating kind comes from the text/AI recognition instead.
+                assert.equal(await page.locator('#schedule-editor [data-sched-once-value]').count(), 0, 'no kind picker');
+                assert.equal(await page.locator('#schedule-editor [data-sched-weekday]').count(), 0, 'and no weekday rail');
+                assert.equal(await page.locator('#schedule-editor #sched-date').count(), 1, 'the day is asked for directly');
+                assert.match(await page.locator('#schedule-editor').innerText(), /某一天/);
+                const day = await page.evaluate(() => { const d = new Date(); d.setDate(d.getDate() + 21); return d.toISOString().slice(0, 10); });
+                await page.fill('#sched-date', day);
                 await page.fill('#sched-start', '19:00');
                 await page.fill('#sched-note', '新安排');
                 await page.locator('[data-action="addScheduleEntry"]').click();
@@ -871,7 +929,8 @@ function installMock() {
                 const saved = await page.evaluate(() => __mock.lastSchedule);
                 assert.equal(saved.id, 'other');
                 assert.equal(saved.entries.length, 1);
-                assert.equal(saved.entries[0].days, 5);
+                assert.equal(saved.entries[0].days, 0, 'a manual entry carries no weekdays');
+                assert.equal(saved.entries[0].date, day, 'it carries the day that was picked');
                 assert.equal(saved.entries[0].start, 1140);
                 assert.equal(saved.entries[0].note, '新安排');
             });
@@ -881,10 +940,12 @@ function installMock() {
                 await page.locator('[data-route="week"]').last().click();
                 assert.match(await page.locator('#content').innerText(), /周表图片/);
                 await page.locator('[data-action="viewScheduleImage"]').click();
-                const src = await page.locator('#modal .sched-img img').getAttribute('src');
+                const src = await page.locator('#img-viewer-img').getAttribute('src');
                 assert.equal(src, '/schedule/hazel.img?v=0');
-                await page.waitForFunction(() => { const i = document.querySelector('#modal .sched-img img'); return i && i.complete && i.naturalWidth > 0; });
-                await page.locator('#modal [data-action="closeModal"]').last().click();
+                await page.waitForFunction(() => { const i = document.querySelector('#img-viewer-img'); return i && i.complete && i.naturalWidth > 0; });
+                assert.equal(await page.locator('#img-viewer').isHidden(), false, 'the picture opens in the viewer, not in a thumbnail');
+                await page.locator('#img-viewer [data-action="closeImageViewer"]').click();
+                assert.equal(await page.locator('#img-viewer').isHidden(), true);
                 await page.locator('[data-route="anchors"]').last().click();
                 await page.locator('[data-anchor-schedule="hazel"]').click();
                 assert.match(await page.locator('#schedule-editor').innerText(), /删除图片/);
@@ -1021,10 +1082,15 @@ function installMock() {
                 const ocr = await page.evaluate(() => __mock.lastOcr);
                 assert.equal(ocr.id, 'hazel');
                 const editor = await page.locator('#schedule-editor').innerText();
-                assert.match(editor, /已有安排\s*4 \/ 16/);
-                const mondayFirst = (new Date().getDay()+6)%7;
-                assert.equal(await page.evaluate(() => scheduleDraft.entries[3].days), 1 << mondayFirst, "the date-only row lands on today's weekday");
-                assert.match(await page.evaluate(() => scheduleDraft.entries[3].note), /生日会/);
+                assert.match(editor, /已有安排\s*每周重复 3 \/ 16 · 只这一次 1 \/ 24/);
+                // The third AI row carried a calendar date instead of a weekday: it becomes a one-off
+                // entry holding that date, not a weekly rule that happens to fall on the same weekday.
+                const dated = await page.evaluate(() => scheduleDraft.entries[3]);
+                assert.equal(dated.days, 0, 'a dated row carries no weekday bits');
+                assert.match(dated.date, /^\d{4}-\d{2}-\d{2}$/, 'the date is stored as a real day');
+                assert.equal(dated.date, new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0')+'-'+String(new Date().getDate()).padStart(2,'0'), 'the mock date is today');
+                assert.match(dated.note, /生日会/);
+                assert.match(editor, /生日会/);
                 assert.match(editor, /AI游戏/);
                 assert.match(editor, /21:00/);
                 // Nothing is saved until the user confirms.
@@ -1410,6 +1476,75 @@ function installMock() {
                 await page.locator('[data-toggle="ring:other"]').click(); await settle();
                 assert.equal((await page.evaluate(() => __mock.lastAnchor)).uid, big, 'the bell toggle must not write back a rounded uid');
             });
+            await test('both per-room watches are switched on the surface, and the probe listens to the danmaku', async () => {
+                await reset('anchors');
+                // 舰长红包 used to hide inside the editor. It is an entry on the anchors page now, the
+                // same shape as 「打开直播间」 on the home page: one button, then a switch per room.
+                assert.equal(await page.locator('[data-action="packetPicker"]').count(), 1, 'the page carries the entry');
+                assert.equal(await page.locator('#packet-picker').count(), 0, 'and it starts folded');
+                await page.locator('[data-action="packetPicker"]').click(); await settle();
+                assert.equal(await page.locator('#packet-picker').count(), 1, 'tapping it unfolds the per-room switches');
+                const packetSwitch = page.locator('#packet-picker [data-toggle="packet:hazel"]');
+                assert.equal(await packetSwitch.getAttribute('aria-checked'), 'false', 'off by default');
+                await page.evaluate(() => { __mock.lastAnchor = null; });
+                await packetSwitch.click(); await settle();
+                assert.equal((await page.evaluate(() => __mock.lastAnchor)).packet, true, 'the room is opted in');
+                assert.equal(await page.locator('#packet-picker [data-toggle="packet:hazel"]').getAttribute('aria-checked'), 'true',
+                    'and the switch keeps showing it after the state comes back');
+                assert.match(await page.locator('.anchor-card').first().innerText(), /舰包/, 'the card says so');
+                assert.equal(await page.locator('.anchor-card .rule-tag.packet').count(), 1,
+                    'and it wears the red 舰包 tag rather than the plain amber one');
+                // 考子闹钟 has an entry of its own beside 舰长红包, and a switch per room inside it.
+                assert.equal(await page.locator('[data-action="kaoziPicker"]').count(), 1, 'the page carries the 考子 entry');
+                assert.equal(await page.locator('#kaozi-picker').count(), 0, 'and it starts folded');
+                await page.locator('[data-action="kaoziPicker"]').click(); await settle();
+                assert.equal(await page.locator('#packet-picker').count(), 0, 'opening one entry closes the other');
+                const clock = page.locator('#kaozi-picker [data-toggle="allDay:hazel"]');
+                assert.equal(await clock.getAttribute('aria-checked'), 'false', 'the all-day clock is off by default');
+                assert.equal(await page.locator('.anchor-card.devoted').count(), 0, 'and no card carries the mark yet');
+                await page.evaluate(() => { __mock.lastAnchor = null; });
+                await clock.click(); await settle();
+                assert.equal((await page.evaluate(() => __mock.lastAnchor)).allDay, true, '考子闹钟 travels as a flag');
+                assert.equal((await page.evaluate(() => __mock.lastAnchor)).packet, true, 'and the packet watch is untouched');
+                assert.equal(await page.locator('.anchor-card.devoted').count(), 1, 'the room\'s card becomes the mark');
+                // The mark is the pair the user asked for: a gold 考 and the sweating emoji behind it.
+                const mark = await page.evaluate(() => {
+                    const card = document.querySelector('.anchor-card.devoted');
+                    return [getComputedStyle(card, '::before').content, getComputedStyle(card, '::after').content].join('|');
+                });
+                assert.match(mark, /考/, 'the corner letter is drawn');
+                assert.match(mark, /😅/, 'and the sweat drop the user asked for sits behind it');
+                assert.equal(await page.locator('#kaozi-picker [data-toggle="allDay:hazel"]').getAttribute('aria-checked'), 'true',
+                    'and the switch keeps showing it after the state comes back');
+                // Flipping a switch re-renders the page; it must not throw the reader back to the top,
+                // which is what made the list feel like it "refreshed itself" under the finger. The
+                // click is dispatched in the page so the test does not scroll the switch into view itself.
+                await page.evaluate(() => window.scrollTo(0, 600)); await settle();
+                const placed = await page.evaluate(() => window.scrollY);
+                await page.evaluate(() => document.querySelector('#kaozi-picker [data-toggle="allDay:hazel"]').click());
+                await settle();
+                assert.equal(await page.evaluate(() => window.scrollY), placed, 'the page keeps its place across a re-render');
+                await page.evaluate(() => document.querySelector('#kaozi-picker [data-toggle="allDay:hazel"]').click());
+                await settle();
+                // The editor keeps the trial instrument and says where the switches went.
+                await page.locator('[data-anchor-edit="hazel"]').click(); await settle();
+                assert.equal(await page.locator('#modal [data-toggle="draftPacket"]').count(), 0, 'the editor no longer carries it');
+                assert.equal(await page.locator('#modal [data-toggle="draftAllDay"]').count(), 0, 'nor the all-day switch');
+                await page.locator('#modal [data-action="probeDanmaku"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.probes), 1, 'the bridge is asked once');
+                assert.match(await page.locator('#packet-probe').innerText(), /POPULARITY_RED_POCKET_V2_START/,
+                    'the report shows what the connection heard');
+                // The editor closes by saving, which is also how the dialog is left on a real phone.
+                await page.evaluate(() => { __mock.lastAnchor = null; });
+                await page.locator('#modal [data-action="saveAnchorDraft"]').click(); await settle();
+                // There is no tier to pick: a 舰长红包 is a 0.1-折 boarding slot anybody may grab, so
+                // the room decides — not the user's own 大航海 level, which no packet depends on.
+                await page.locator('[data-route="settings"]').last().click(); await settle();
+                assert.equal(await page.locator('[data-setting="packetLevel"]').count(), 0,
+                    'no tier selector is offered');
+                assert.match(await page.locator('section.card', { hasText: '什么是舰长红包' }).innerText(), /0\.1 折上舰/,
+                    'the section says what a 舰长红包 is');
+            });
             // The overflow guard: past 18 digits the value cannot fit a Java long either, so the
             // field refuses it before anything is sent rather than letting the bridge truncate it.
             await test('add-anchor: a 19-digit number is refused before it reaches the bridge', async () => {
@@ -1499,7 +1634,7 @@ function installMock() {
             await test('the home switch turns the fast pace on and the card follows the service', async () => {
                 await reset();
                 const card = page.locator('[data-high-card]');
-                assert.match(await card.innerText(), /高频时段检测/);
+                assert.match(await card.innerText(), /自动检测节奏/);
                 assert.match(await card.innerText(), /关闭中 · 全天每 30 秒一次/);
                 await page.evaluate(() => { __mock.lastSave = null; });
                 await page.locator('[data-high-card] [data-toggle="highFrequency"]').click(); await settle();
@@ -1568,9 +1703,323 @@ function installMock() {
                     __mock.state.config.highWindows.forEach(w => { w.enabled = false; });
                     return window.refreshNative(true);
                 });
-                const section = page.locator('section.card', { hasText: '高频时段检测' }).first();
+                const section = page.locator('section.card', { hasText: '自动检测节奏' }).first();
                 assert.match(await section.innerText(), /没有启用中的高频时段/);
                 assert.match(await section.innerText(), /一直按每 2 分钟一次检测/);
+            });
+            // ---- the schedule picture, big enough to read -----------------------------------
+            // The uploaded timetable is a large picture of small text. A thumbnail (or a sheet-width
+            // image) is the one size it cannot be read at, so the picture opens full screen and has
+            // to be zoomable by both gestures and the two buttons.
+            await test('the schedule picture opens full screen and zooms, pans and resets', async () => {
+                await reset('anchors');
+                await page.evaluate(async () => {
+                    __mock.state.anchors[0].scheduleImage = true;
+                    __mock.state.anchors[0].scheduleImageRevision = 'r1';
+                    await window.refreshNative(true);
+                });
+                // Both ways in: the 周表 page button and the picture inside the editor.
+                await page.locator('[data-route="week"]').last().click();
+                await page.locator('[data-action="viewScheduleImage"]').click();
+                // Wait for the fit, not just the load: the picture is revealed once it has been
+                // fitted, and reading the scale before that would race the reveal.
+                await page.waitForFunction(() => imageViewer.open && imageViewer.min < 1
+                    && Math.abs(imageViewer.scale - imageViewer.min) < 1e-9
+                    && document.querySelector('#img-viewer-img').style.opacity === '1');
+                // Synthetic touches: a real phone sends these, and the viewer's whole job is what it
+                // does with them. Installed after the last page load, since a reload drops globals.
+                // A real touchend reports no remaining touches and the lifted ones separately, so
+                // the helper takes both lists — dispatching them as one is what makes a synthetic
+                // tap look like a finger that is still down.
+                await page.evaluate(() => {
+                    window.__touch = (type, points, changed) => {
+                        const box = document.getElementById('img-viewer');
+                        const mk = list => list.map(([id, x, y]) => new Touch({ identifier: id, target: box, clientX: x, clientY: y }));
+                        const touches = mk(points);
+                        box.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true,
+                            touches, targetTouches: touches, changedTouches: mk(changed === undefined ? points : changed) }));
+                    };
+                });
+                const fitted = await page.evaluate(() => ({ scale: imageViewer.scale, min: imageViewer.min, max: imageViewer.max, x: imageViewer.x, y: imageViewer.y,
+                    nw: document.querySelector('#img-viewer-img').naturalWidth }));
+                assert.equal(fitted.nw, 520, 'the uploaded picture is the one on screen');
+                assert.ok(Math.abs(fitted.scale - fitted.min) < 1e-6, 'it opens fitted to the screen width');
+                assert.ok(fitted.min < 1 && fitted.max > 1, `a picture wider than the screen fits below 1:1 and can zoom past it (${fitted.min}..${fitted.max})`);
+                // At the width fit the picture fills the width exactly, and what is left over is
+                // centred vertically — a timetable is taller than it is wide only once zoomed in.
+                assert.equal(fitted.x, 0, 'at the width fit there is no horizontal margin to centre');
+                assert.ok(fitted.y > 0, 'the leftover height is centred instead of hugging the top');
+                // Double tap zooms in on the spot that was tapped.
+                await page.evaluate(() => { __touch('touchstart', [[1, 150, 300]]); __touch('touchend', [], [[1, 150, 300]]);
+                                           __touch('touchstart', [[1, 150, 300]]); __touch('touchend', [], [[1, 150, 300]]); });
+                const zoomed = await page.evaluate(() => imageViewer.scale);
+                assert.ok(zoomed > fitted.min * 2, `a double tap zooms in, got ${zoomed}`);
+                // Dragging pans a zoomed picture...
+                const before = await page.evaluate(() => ({ x: imageViewer.x, y: imageViewer.y }));
+                await page.evaluate(() => { __touch('touchstart', [[1, 200, 500]]); __touch('touchmove', [[1, 160, 420]]); __touch('touchend', [], [[1, 160, 420]]); });
+                const after = await page.evaluate(() => ({ x: imageViewer.x, y: imageViewer.y }));
+                assert.ok(after.y !== before.y || after.x !== before.x, 'a drag pans the zoomed picture');
+                assert.ok(after.y <= 0 || after.x <= 0, 'panning stays inside the picture');
+                // ...and a second double tap goes back to the fit.
+                await page.evaluate(() => { __touch('touchstart', [[1, 150, 300]]); __touch('touchend', [], [[1, 150, 300]]);
+                                           __touch('touchstart', [[1, 150, 300]]); __touch('touchend', [], [[1, 150, 300]]); });
+                assert.ok(Math.abs(await page.evaluate(() => imageViewer.scale) - fitted.min) < 1e-6, 'a double tap while zoomed returns to the fit');
+                // Pinching out enlarges by the ratio the fingers moved: 80 px apart to 200 px is 2.5x.
+                await page.evaluate(() => { __touch('touchstart', [[1, 160, 400], [2, 240, 400]]);
+                                           __touch('touchmove', [[1, 100, 400], [2, 300, 400]]);
+                                           __touch('touchend', [], [[1, 100, 400], [2, 300, 400]]); });
+                const pinched = await page.evaluate(() => imageViewer.scale);
+                assert.ok(Math.abs(pinched / fitted.min - 2.5) < 0.02, `a pinch zooms by the finger ratio, got ${(pinched / fitted.min).toFixed(3)}x`);
+                // The two buttons: 原始大小 is 1:1, 适应屏幕 returns to the fit.
+                await page.locator('#img-viewer [data-img-action="actual"]').click();
+                assert.ok(Math.abs(await page.evaluate(() => imageViewer.scale) - 1) < 1e-6, '原始大小 shows the picture at 1:1');
+                await page.locator('#img-viewer [data-img-action="fit"]').click();
+                assert.ok(Math.abs(await page.evaluate(() => imageViewer.scale) - fitted.min) < 1e-6, '适应屏幕 returns to the fit');
+                // The back key closes the viewer before anything else, and scrolling comes back.
+                await page.evaluate(() => window.appBack());
+                assert.equal(await page.locator('#img-viewer').isHidden(), true, 'the back key closes the picture');
+                assert.equal(await page.evaluate(() => document.body.style.overflow), '', 'the page can scroll again');
+                // The editor's own picture is the second way in, and it opens the same viewer.
+                await page.locator('[data-route="anchors"]').last().click();
+                await page.locator('[data-anchor-schedule="hazel"]').click();
+                await page.locator('#modal .sched-img-open').click();
+                await page.waitForFunction(() => imageViewer.open);
+                assert.match(await page.locator('#img-viewer-img').getAttribute('src'), /^\/schedule\/hazel\.img\?v=r1$/);
+                await page.locator('#img-viewer [data-action="closeImageViewer"]').click();
+                assert.equal(await page.locator('#img-viewer').isHidden(), true);
+            });
+            // ---- 1.2.0: the calendar, the learned hours and the walk-in ----------------------
+            // 日程 shares one store with the weekly table and adds a date to it, so these check that
+            // the two kinds never overwrite each other's fields or allowances.
+            await test('a dated arrangement is saved as a one-off and appears under 即将到来', async () => {
+                await reset('anchors');
+                const future = await page.evaluate(() => {
+                    const d = new Date(); d.setDate(d.getDate() + 30);
+                    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                });
+                await page.locator('[data-anchor-schedule="hazel"]').click();
+                await page.locator('#sched-date').fill(future);
+                await page.locator('#sched-start').fill('20:00');
+                await page.locator('#sched-note').fill('平安夜直播');
+                await page.locator('#sched-lead').selectOption('60');
+                await page.locator('[data-action="addScheduleEntry"]').click();
+                assert.match(await page.locator('#schedule-editor').innerText(), /提前 1 小时/);
+                await page.locator('[data-action="saveSchedule"]').click(); await settle();
+                const saved = await page.evaluate(() => __mock.lastSchedule);
+                const entry = saved.entries.find(e => e.date === future);
+                assert.ok(entry, 'the entry keeps its calendar date');
+                assert.equal(entry.days, 0, 'a dated entry carries no weekday bits');
+                assert.equal(entry.start, 1200);
+                assert.equal(entry.lead, 60, 'the chosen notice lead travels with the entry');
+                assert.match(entry.note, /平安夜/);
+                assert.ok(saved.entries.some(e => e.id === 'w1' && e.days === 16), 'the weekly row is still there');
+                // And the calendar shows it as an upcoming day rather than as a weekly row.
+                await page.locator('[data-route="week"]').last().click();
+                const copy = await page.locator('#content').innerText();
+                assert.match(copy, /即将到来/);
+                assert.match(copy, new RegExp(Number(future.slice(5, 7)) + '月' + Number(future.slice(8, 10)) + '日'));
+            });
+            await test('an arranged day that has passed is listed as ended and cleared in one tap', async () => {
+                await reset('anchors');
+                await page.evaluate(async () => {
+                    __mock.state.anchors[0].schedule = [
+                        { id: 'p1', days: 0, date: '2020-01-01', start: 1200, end: -1, note: '过期的', lead: 0 },
+                        { id: 'w1', days: 16, start: 1200, end: 1260, note: '游戏', date: '', lead: 0 }];
+                    await window.refreshNative(true);
+                });
+                await page.locator('[data-route="week"]').last().click();
+                const copy = await page.locator('#content').innerText();
+                assert.match(copy, /已结束/);
+                assert.match(copy, /清理 1 条/);
+                assert.doesNotMatch(copy, /即将到来/, 'a past day is not upcoming');
+                await page.locator('[data-action="clearEndedSchedule"]').click(); await settle();
+                const saved = await page.evaluate(() => __mock.lastSchedule);
+                assert.equal(saved.id, 'hazel');
+                assert.deepEqual(saved.entries.map(e => e.id), ['w1'], 'only the ended day is removed');
+            });
+            await test('a card keeps only what a glance needs: the day, not a footer of labels', async () => {
+                await reset('anchors');
+                const future = await page.evaluate(() => {
+                    const d = new Date(); d.setDate(d.getDate() + 30);
+                    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                });
+                // The page clock is pinned to 03:00 that day: the weekly row starts at 20:00, and the
+                // renderer treats a start within thirty minutes of now as already begun (the same
+                // slack the reminder side uses). Run this suite between 19:30 and 20:00 and that row
+                // would legitimately read 正在直播, failing a case that is about card density, not time.
+                await page.evaluate(async f => {
+                    const t = new Date(); t.setHours(3, 0, 0, 0); __mock.state.now = t.getTime();
+                    __mock.state.anchors[0].schedule = [
+                        { id: 'w1', days: 16, start: 1200, end: 1260, note: '游戏', date: '', lead: 0 },
+                        { id: 'o1', days: 0, date: f, start: 1320, end: -1, note: '生日会', lead: 30 }];
+                    await window.refreshNative(true);
+                }, future);
+                await page.locator('[data-route="week"]').last().click();
+                const cards = await page.evaluate(() => [...document.querySelectorAll('.sched-card')].map(card => ({
+                    meta: (card.querySelector('.sched-meta') || { innerText: '' }).innerText.replace(/\s+/g, ' ').trim(),
+                    state: (card.querySelector('.sched-state') || { innerText: '' }).innerText.trim(),
+                    day: (card.querySelector('.sched-badge') || { innerText: '' }).innerText.trim(),
+                    foot: card.querySelector('.sched-foot') ? 1 : 0,
+                    footers: card.querySelectorAll('.rule-footer').length,
+                    once: card.classList.contains('once')
+                })));
+                // The footer that carried the kind tag and the notice lead is gone: the user read both
+                // as noise, and a dated row already says its day while a weekly one sits under its
+                // weekday. Nothing on a card may resurrect it.
+                assert.equal(cards.filter(c => c.foot || c.footers).length, 0,
+                    `no card may carry a footer again, got ${JSON.stringify(cards)}`);
+                assert.equal(cards.filter(c => /提前|提醒/.test(c.meta)).length, 0,
+                    'and the notice lead is not printed on the card either');
+                const weekly = cards.find(c => !c.once);
+                const once = cards.find(c => c.once);
+                assert.ok(weekly && once, `both kinds are on the page, got ${JSON.stringify(cards)}`);
+                assert.equal(weekly.day, '', 'a weekly row shows no day chip — its weekday is the section it sits under');
+                assert.equal(weekly.state, '计划开播');
+                assert.match(once.day, /\d+月\d+日/, 'a dated row keeps its day in the state line');
+                assert.match(once.state, /计划开播/);
+                // The lead still has to be settable and visible somewhere: the editor is that place.
+                const intro = await page.locator('#content .hint').first().innerText();
+                assert.match(intro, /提前提醒/);
+                assert.match(intro, /编辑这条安排/, 'the page says where the lead lives now');
+                await page.locator('[data-route="anchors"]').last().click();
+                await page.locator('[data-anchor-schedule="hazel"]').click();
+                const editor = await page.locator('#schedule-editor').innerText();
+                // Existing entries of both kinds are still labelled in the list they are edited in —
+                // that is where the difference has to be readable — even though adding one by hand
+                // no longer asks which kind it is.
+                assert.match(editor, /每周重复/);
+                assert.match(editor, /只这一次/);
+                assert.match(editor, /开播前 30 分钟提醒/, 'the editor still shows each row\'s lead');
+                await page.locator('#modal .sheet-head [data-action="closeModal"]').click();
+            });
+            await test('a watch window cannot be made for a single day', async () => {
+                // The store keeps no day for a window (Prefs.cleanWindows), so a single-day rule would
+                // save with no weekdays at all: one that can never match while still counting as an
+                // enabled window. The editor therefore offers only the weekly kind.
+                await reset('schedule');
+                // The reminder list's add button: the high-frequency one carries data-rule-target.
+                await page.locator('#content [data-action="addRule"]:not([data-rule-target])').click();
+                assert.equal(await page.locator('#rule-date-field').count(), 0, 'no date field in a window editor');
+                assert.equal(await page.locator('[data-rule-once]').count(), 0, 'and no single-day choice');
+                await page.locator('#rule-start').fill('20:00');
+                await page.locator('#rule-end').fill('22:00');
+                // A new rule starts on every day; taking them all away must be refused rather than
+                // saved as a rule that can never match.
+                for (let d = 0; d < 7; d++) await page.locator(`#modal [data-weekday="${d}"]`).click();
+                await page.locator('#modal [data-action="saveRule"]').click();
+                assert.match(await page.locator('#rule-error').innerText(), /请至少选择一个星期/);
+                await page.evaluate(() => { __mock.lastSave = null; });
+                await page.locator('#modal [data-weekday="4"]').click();
+                await page.locator('#modal [data-action="saveRule"]').click(); await settle();
+                const windows = await page.evaluate(() => __mock.lastSave.windows);
+                const added = windows.find(w => w.start === 1200);
+                assert.ok(added, `the window was saved, got ${JSON.stringify(windows)}`);
+                assert.equal(added.days, 16, 'the weekday bits are what a window carries');
+                assert.equal(added.date, '', 'and never a day');
+            });
+            await test('the learned hours replace the high-frequency windows after a confirmation', async () => {
+                await reset('schedule');
+                await page.locator('[data-action="suggestHighWindows"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.suggested), 1, 'the bridge is asked once');
+                const dialog = await page.locator('#modal').innerText();
+                assert.match(dialog, /17 场/);
+                assert.match(dialog, /82%/);
+                assert.match(dialog, /08:00–11:00/);
+                assert.match(dialog, /20:00–23:00/);
+                await page.evaluate(() => { __mock.lastSave = null; });
+                await page.locator('[data-action="applyHighWindows"]').click(); await settle();
+                const saved = await page.evaluate(() => __mock.lastSave);
+                assert.equal(saved.windows, undefined, 'only the high-frequency list is replaced');
+                assert.equal(saved.highWindows.length, 2);
+                assert.deepEqual(saved.highWindows.map(w => [w.start, w.end]), [[480, 660], [1200, 1380]]);
+                assert.equal(saved.highWindows.every(w => w.days === 127 && w.enabled === true), true, 'the proposed windows are every-day ones');
+                // With too little history the button admits it instead of inventing hours.
+                await reset('schedule');
+                await page.evaluate(() => { __mock.fewSamples = true; });
+                await page.locator('[data-action="suggestHighWindows"]').click(); await settle();
+                assert.match(await page.locator('#high-suggest').innerText(), /样本还太少/);
+            });
+            await test('the slow pace is a choice and the copy follows it', async () => {
+                await reset('schedule');
+                // The floor now runs down to thirty seconds: a stream nobody announced is the whole
+                // point of the alarm, and one batched request a cycle made that affordable.
+                assert.deepEqual(await page.locator('[data-setting="lowPollSeconds"] option').allInnerTexts(),
+                    ['每 30 秒', '每 1 分钟', '每 2 分钟', '每 5 分钟']);
+                await page.locator('[data-setting="lowPollSeconds"]').selectOption('300'); await settle();
+                assert.equal(await page.evaluate(() => __mock.lastSave.lowPollSeconds), 300);
+                await page.locator('[data-setting="lowPollSeconds"]').selectOption('30'); await settle();
+                assert.equal(await page.evaluate(() => __mock.lastSave.lowPollSeconds), 30,
+                    'the shortest choice travels as a number, not as a string');
+                await page.locator('[data-setting="lowPollSeconds"]').selectOption('300'); await settle();
+                await page.evaluate(async () => {
+                    __mock.state.config.highFrequency = true; __mock.state.highInside = false; __mock.state.pollSecondsNow = 300;
+                    await window.refreshNative(true);
+                });
+                const section = page.locator('section.card', { hasText: '自动检测节奏' }).first();
+                assert.match(await section.innerText(), /每 5 分钟/);
+                assert.match(await section.innerText(), /放慢到每 5 分钟一次/, 'the wording uses the chosen pace, not a hard-coded two minutes');
+            });
+            await test('the pacing card says which of the two things lifted the pace', async () => {
+                await reset();
+                const card = page.locator('[data-high-card]');
+                const line = async () => (await card.innerText()).replace(/\s+/g, ' ');
+                assert.match(await line(), /关闭中 · 全天每 30 秒一次/, 'with the option off the pace is the configured one');
+                await page.evaluate(async () => {
+                    __mock.state.config.highFrequency = true; __mock.state.highInside = true;
+                    __mock.state.deviceInUse = false; __mock.state.highNextBoundary = Date.now() + 3600000;
+                    await window.refreshNative(true);
+                });
+                assert.match(await line(), /高频时段内 · 每 30 秒一次/, 'a window the user drew lifts the pace');
+                await page.evaluate(async () => {
+                    __mock.state.highInside = false; __mock.state.deviceInUse = true;
+                    await window.refreshNative(true);
+                });
+                assert.match(await line(), /手机在用 · 已按每 30 秒一次检测/, 'a phone in use lifts it too');
+                await page.evaluate(async () => {
+                    __mock.state.deviceInUse = false;
+                    await window.refreshNative(true);
+                });
+                assert.match(await line(), /低频时段 · 每 2 分钟一次/, 'with neither, the slow floor is kept');
+                await page.evaluate(async () => {
+                    __mock.state.config.highFrequency = false; __mock.state.deviceInUse = true;
+                    await window.refreshNative(true);
+                });
+                assert.match(await line(), /关闭中 · 全天每 30 秒一次/,
+                    'a phone in use changes nothing while the option is off');
+            });
+            await test('the alarm-time switches are their own settings', async () => {
+                await reset('settings');
+                const card = page.locator('section.card', { hasText: '开播后自动进入直播间' }).first();
+                await card.locator('[data-toggle="autoOpenLive"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.lastSave.autoOpenLive), true);
+                await page.locator('section.card', { hasText: '直播结束时告诉我' }).first().locator('[data-toggle="endNotice"]').click(); await settle();
+                assert.equal(await page.evaluate(() => __mock.lastSave.endNotice), true);
+            });
+            await test('the ringing page counts down to the room and can be called off', async () => {
+                await page.goto(`http://127.0.0.1:${server.address().port}/alarm.html`);
+                await page.waitForFunction(() => typeof window.refreshNative === 'function');
+                await page.evaluate(async () => {
+                    __mock.opened = []; __mock.openedPatches = [];
+                    __mock.state.config.autoOpenLive = true;
+                    Object.assign(__mock.state, { ringing: true, alarmTest: false, alarmSilent: false, alarmAnchorId: 'hazel',
+                        alarmAnchor: '灰泽满 Hazel', alarmTitle: '画画中', alarmUntil: Date.now() + 60000 });
+                    await window.refreshNative(true);
+                });
+                assert.match(await page.locator('#auto-open').innerText(), /响铃后 5 秒自动进入直播间/);
+                await page.locator('[data-action="cancelAutoOpen"]').click();
+                assert.match(await page.locator('#auto-open').innerText(), /已取消自动进入直播间/);
+                await page.waitForTimeout(1200);
+                assert.deepEqual(await page.evaluate(() => __mock.opened), [], 'cancelling really stops it');
+                // With a live countdown it opens the room by itself, flagged as automatic.
+                await page.evaluate(async () => {
+                    __mock.state.ringing = false; await window.refreshNative(true);
+                    Object.assign(__mock.state, { ringing: true, alarmUntil: Date.now() + 60000 });
+                    await window.refreshNative(true);
+                    autoOpen.left = 1;
+                });
+                await page.waitForTimeout(1600);
+                assert.deepEqual(await page.evaluate(() => __mock.opened), ['hazel'], 'the countdown opens the room');
+                assert.equal(await page.evaluate(() => __mock.openedPatches[0].auto), true, 'and says it was automatic');
             });
         console.log(`PASS: ${results.length} ${legacy ? 'original regression reproductions' : 'UI and bridge regression scenarios'}`);
         if (output) fs.writeFileSync(path.join(output, legacy ? 'original-regressions.json' : 'ui-regressions.json'), JSON.stringify({ legacy, results, errors }, null, 2));

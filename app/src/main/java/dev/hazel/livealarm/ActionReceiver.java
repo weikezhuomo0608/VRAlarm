@@ -39,15 +39,28 @@ public class ActionReceiver extends BroadcastReceiver {
         }
         if(AlarmScheduler.PRESTREAM.equals(action)){
             if(!p.enabled())return;
-            long startAt=p.raw().getLong("preStreamAt",0);
-            // The alarm is armed for start minus the lead, so freshness is measured against that
-            // moment: a fire the device slept through stays silent instead of announcing a stream
-            // that has already begun. The next cycle re-arms anyway.
-            long armedFor=startAt-PollPlan.PRESTREAM_LEAD_MILLIS;
-            if(startAt>0&&armedFor>0&&System.currentTimeMillis()-armedFor<120000L)GuardianService.preStreamNotice(context);
+            // Freshness is measured against the moment the alarm was actually set for, which is
+            // stored: a fire the device slept through stays silent instead of announcing a stream
+            // that has already begun. The next cycle re-arms anyway. No lead is subtracted here —
+            // per-entry leads turned that arithmetic into a bug waiting to happen.
+            long armAt=p.raw().getLong("preStreamArmAt",0);
+            if(armAt>0&&System.currentTimeMillis()-armAt<120000L)GuardianService.preStreamNotice(context);
             return;
         }
         if(AlarmScheduler.SNOOZE.equals(action)){if(p.enabled()&&p.raw().getLong("snoozeAt",0)>0)GuardianService.send(context,action);return;}
-        if(AlarmScheduler.TEST.equals(action)&&p.raw().getLong("testAt",0)>0){p.raw().edit().putLong("testAt",0).apply();GuardianService.send(context,"TEST");}
+        if(AlarmScheduler.TEST.equals(action)&&p.raw().getLong("testAt",0)>0){p.raw().edit().putLong("testAt",0).apply();GuardianService.send(context,"TEST");return;}
+        // A red-packet notice's own button. Tapping the notification is what grants the app a short
+        // window in which it may start an activity, which is why this lives here and not in the
+        // service: a background start from the service would simply be refused on Android 10+.
+        if("OPEN_ROOM".equals(action)){
+            long room=intent.getLongExtra("room",0);
+            if(room<=0)return;
+            Intent view=new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://live.bilibili.com/"+room)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try{context.startActivity(new Intent(view).setPackage("tv.danmaku.bili"));}
+            catch(Exception e){
+                try{context.startActivity(new Intent(view));}
+                catch(Exception ignored){p.log("warning","没有可用的应用打开直播间","请安装 B 站客户端或浏览器");}
+            }
+        }
     }
 }

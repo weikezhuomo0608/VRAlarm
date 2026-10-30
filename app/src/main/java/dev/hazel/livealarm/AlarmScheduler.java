@@ -64,13 +64,14 @@ public final class AlarmScheduler {
      * alarm further out, so it only ever fires when the ordinary cycle really did not come back.
      */
     /**
-     * The weekly-schedule heads-up: one exact alarm at the scheduled start minus the lead.
-     * `startAt` is the start itself, so the subtraction happens in exactly one place here.
+     * The schedule heads-up: one exact alarm at the moment the caller worked out. The caller passes
+     * `armAt` itself because each entry may carry its own notice lead — subtracting a constant here
+     * would announce every entry five minutes early, whatever the user configured.
      */
-    public static void preStream(Context context,long startAt){
+    public static void preStream(Context context,long armAt){
         Prefs p=new Prefs(context);cancel(context,PRESTREAM);
-        if(!p.enabled()||startAt<=0)return;
-        at(context,PRESTREAM,startAt-PollPlan.PRESTREAM_LEAD_MILLIS);
+        if(!p.enabled()||armAt<=0)return;
+        at(context,PRESTREAM,armAt);
     }
     public static void keepAlive(Context context){
         Prefs p=new Prefs(context);cancel(context,KEEPALIVE);
@@ -79,8 +80,12 @@ public final class AlarmScheduler {
         if(!p.enabled()||!p.watchingNow())return;
         long now=System.currentTimeMillis();JSONObject c=p.config();
         boolean continuous=c.optBoolean("turbo",true);
-        int seconds=PollPlan.keepAliveSeconds(c.optInt("pollSeconds",30),p.allowed(now),continuous);
-        if(continuous)atDozeProof(context,KEEPALIVE,now+seconds*1000L);
-        else at(context,KEEPALIVE,now+seconds*1000L);
+        // The effective pace, not the configured one: outside the reminder windows a 考子 anchor is
+        // the only reason the loop runs, and those hours are paced by the slow floor. The net's own
+        // period follows the same rule — see PollPlan.netSeconds.
+        int seconds=p.pollSecondsNow();
+        boolean outside=!p.insideWindows(now);
+        long at=now+(long)PollPlan.netSeconds(seconds,continuous,outside)*1000L;
+        if(continuous)atDozeProof(context,KEEPALIVE,at);else at(context,KEEPALIVE,at);
     }
 }

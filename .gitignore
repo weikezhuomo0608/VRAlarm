@@ -75,3 +75,23 @@ tools/render_pet_preview.py
 tools/spine_render.py
 tests/_petdiag.cjs
 tests/_quietshot.cjs
+tests/_viewshot.cjs
+tests/_shot120.cjs
+tests/_shot-tidy.cjs
+
+# local-only probe script (danmaku connectivity) and UI screenshot harnesses
+_ws-probe.py
+_shot-ui.cjs
+_shot-kao.cjs
+_shot-kao-variants.cjs
+_shot-kao-diag.cjs
+_check-line-1.2.0.cjs
+
+# scratch from local API probing (2026-09-17 UID work)
+.tmp-probe/
+# Presentation images stay on this machine; Releases carry the APKs, not the screenshots
+/1.1.8展示图.jpg
+/主播演示.jpg
+/周表演示.jpg
+/版本迭代.png
+

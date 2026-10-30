@@ -113,6 +113,20 @@ public final class AnchorsTests {
         check(Anchors.sanitize(seed).get(0).uidText.equals("1298779265"),"sanitize preserves the uid text");
         check(seed.get(0).withEnabled(false).uidText.equals("1298779265"),"withEnabled carries the uid text across");
         check(seed.get(0).withAlarm(false).uidText.equals("1298779265"),"withAlarm carries the uid text across");
+        // The two per-anchor opt-ins (舰长红包 and 考子闹钟) are independent flags, off by default, and
+        // every copy has to carry both: dropping one is how the editor came back showing it as off.
+        Anchors.Anchor plain=new Anchors.Anchor("a","甲",7L,8L,true);
+        check(!plain.packet&&!plain.allDay,"both opt-ins are off by default");
+        check(plain.withPacket(true).allDay==false&&plain.withAllDay(true).packet==false,"each flag has its own switch");
+        Anchors.Anchor both=plain.withPacket(true).withAllDay(true);
+        check(both.packet&&both.allDay,"both can be on at once");
+        check(both.withEnabled(false).packet&&both.withEnabled(false).allDay,"withEnabled carries both flags");
+        check(both.withAlarm(false).packet&&both.withAlarm(false).allDay,"withAlarm carries both flags");
+        check(both.withPacket(false).allDay,"withPacket leaves 考子闹钟 alone");
+        check(both.withAllDay(false).packet,"withAllDay leaves the packet watch alone");
+        check(plain.withAllDay(true).uidText.equals("7"),"withAllDay carries the uid text across");
+        Anchors.Anchor stored=new Anchors.Anchor("b","乙","7",8L,true,true,true,true);
+        check(stored.packet&&stored.allDay&&stored.uid==7,"the storage shape takes both flags and the uid text");
         System.out.println("PASS: "+count+" anchor list assertions");
     }
 }
